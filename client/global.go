@@ -3,9 +3,7 @@ package client
 import (
 	"bytes"
 	"crypto/md5"
-	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"math/rand"
@@ -26,114 +24,130 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-type DeviceInfo struct {
-	Display     []byte
-	Product     []byte
-	Device      []byte
-	Board       []byte
-	Brand       []byte
-	Model       []byte
-	Bootloader  []byte
-	FingerPrint []byte
-	BootId      []byte
-	ProcVersion []byte
-	BaseBand    []byte
-	SimInfo     []byte
-	OSType      []byte
-	MacAddress  []byte
-	IpAddress   []byte
-	WifiBSSID   []byte
-	WifiSSID    []byte
-	IMSIMd5     []byte
-	IMEI        string
-	AndroidId   []byte
-	APN         []byte
-	Guid        []byte
-	TgtgtKey    []byte
-	Protocol    ClientProtocol
-	Version     *Version
-}
+type (
+	DeviceInfo struct {
+		Display      []byte
+		Product      []byte
+		Device       []byte
+		Board        []byte
+		Brand        []byte
+		Model        []byte
+		Bootloader   []byte
+		FingerPrint  []byte
+		BootId       []byte
+		ProcVersion  []byte
+		BaseBand     []byte
+		SimInfo      []byte
+		OSType       []byte
+		MacAddress   []byte
+		IpAddress    []byte
+		WifiBSSID    []byte
+		WifiSSID     []byte
+		IMSIMd5      []byte
+		IMEI         string
+		AndroidId    []byte
+		APN          []byte
+		VendorName   []byte
+		VendorOSName []byte
+		Guid         []byte
+		TgtgtKey     []byte
+		Protocol     ClientProtocol
+		Version      *Version
+	}
 
-type Version struct {
-	Incremental []byte
-	Release     []byte
-	CodeName    []byte
-	Sdk         uint32
-}
+	Version struct {
+		Incremental []byte
+		Release     []byte
+		CodeName    []byte
+		Sdk         uint32
+	}
 
-type DeviceInfoFile struct {
-	Display     string       `json:"display"`
-	Product     string       `json:"product"`
-	Device      string       `json:"device"`
-	Board       string       `json:"board"`
-	Model       string       `json:"model"`
-	FingerPrint string       `json:"finger_print"`
-	BootId      string       `json:"boot_id"`
-	ProcVersion string       `json:"proc_version"`
-	Protocol    int          `json:"protocol"` // 0: Pad 1: Phone 2: Watch
-	IMEI        string       `json:"imei"`
-	Brand       string       `json:"brand"`
-	Bootloader  string       `json:"bootloader"`
-	BaseBand    string       `json:"base_band"`
-	Version     *VersionFile `json:"version"`
-	SimInfo     string       `json:"sim_info"`
-	OsType      string       `json:"os_type"`
-	MacAddress  string       `json:"mac_address"`
-	IpAddress   []int32      `json:"ip_address"`
-	WifiBSSID   string       `json:"wifiBSSID"`
-	WifiSSID    string       `json:"wifiSSID"`
-	ImsiMd5     string       `json:"imsiMd5"`
-	AndroidId   string       `json:"android_id"`
-	Apn         string       `json:"apn"`
-}
+	DeviceInfoFile struct {
+		Display      string       `json:"display"`
+		Product      string       `json:"product"`
+		Device       string       `json:"device"`
+		Board        string       `json:"board"`
+		Model        string       `json:"model"`
+		FingerPrint  string       `json:"finger_print"`
+		BootId       string       `json:"boot_id"`
+		ProcVersion  string       `json:"proc_version"`
+		Protocol     int          `json:"protocol"` // 0: Pad 1: Phone 2: Watch
+		IMEI         string       `json:"imei"`
+		Brand        string       `json:"brand"`
+		Bootloader   string       `json:"bootloader"`
+		BaseBand     string       `json:"base_band"`
+		Version      *VersionFile `json:"version"`
+		SimInfo      string       `json:"sim_info"`
+		OsType       string       `json:"os_type"`
+		MacAddress   string       `json:"mac_address"`
+		IpAddress    []int32      `json:"ip_address"`
+		WifiBSSID    string       `json:"wifi_bssid"`
+		WifiSSID     string       `json:"wifi_ssid"`
+		ImsiMd5      string       `json:"imsi_md5"`
+		AndroidId    string       `json:"android_id"`
+		Apn          string       `json:"apn"`
+		VendorName   string       `json:"vendor_name"`
+		VendorOSName string       `json:"vendor_os_name"`
+	}
 
-type VersionFile struct {
-	Incremental string `json:"incremental"`
-	Release     string `json:"release"`
-	Codename    string `json:"codename"`
-	Sdk         uint32 `json:"sdk"`
-}
+	VersionFile struct {
+		Incremental string `json:"incremental"`
+		Release     string `json:"release"`
+		Codename    string `json:"codename"`
+		Sdk         uint32 `json:"sdk"`
+	}
 
-type groupMessageBuilder struct {
-	MessageSlices []*msg.Message
-}
+	groupMessageBuilder struct {
+		MessageSlices []*msg.Message
+	}
 
-type versionInfo struct {
-	ApkSign         []byte
-	ApkId           string
-	SortVersionName string
-	SdkVersion      string
-	AppId           uint32
-	BuildTime       uint32
-	SSOVersion      uint32
-	MiscBitmap      uint32
-	SubSigmap       uint32
-	MainSigMap      uint32
-}
+	versionInfo struct {
+		ApkSign         []byte
+		ApkId           string
+		SortVersionName string
+		SdkVersion      string
+		AppId           uint32
+		BuildTime       uint32
+		SSOVersion      uint32
+		MiscBitmap      uint32
+		SubSigmap       uint32
+		MainSigMap      uint32
+	}
+
+	incomingPacketInfo struct {
+		CommandName string
+		SequenceId  uint16
+		Params      requestParams
+	}
+
+	requestParams map[string]interface{}
+)
 
 // default
 var SystemDeviceInfo = &DeviceInfo{
-	Display:     []byte("MIRAI.123456.001"),
-	Product:     []byte("mirai"),
-	Device:      []byte("mirai"),
-	Board:       []byte("mirai"),
-	Brand:       []byte("mamoe"),
-	Model:       []byte("mirai"),
-	Bootloader:  []byte("unknown"),
-	FingerPrint: []byte("mamoe/mirai/mirai:10/MIRAI.200122.001/1234567:user/release-keys"),
-	BootId:      []byte("cb886ae2-00b6-4d68-a230-787f111d12c7"),
-	ProcVersion: []byte("Linux version 3.0.31-cb886ae2 (android-build@xxx.xxx.xxx.xxx.com)"),
-	BaseBand:    []byte{},
-	SimInfo:     []byte("T-Mobile"),
-	OSType:      []byte("android"),
-	MacAddress:  []byte("00:50:56:C0:00:08"),
-	IpAddress:   []byte{10, 0, 1, 3}, // 10.0.1.3
-	WifiBSSID:   []byte("00:50:56:C0:00:08"),
-	WifiSSID:    []byte("<unknown ssid>"),
-	IMEI:        "468356291846738",
-	AndroidId:   []byte("MIRAI.123456.001"),
-	APN:         []byte("wifi"),
-	Protocol:    IPad,
+	Display:      []byte("MIRAI.123456.001"),
+	Product:      []byte("mirai"),
+	Device:       []byte("mirai"),
+	Board:        []byte("mirai"),
+	Brand:        []byte("mamoe"),
+	Model:        []byte("mirai"),
+	Bootloader:   []byte("unknown"),
+	FingerPrint:  []byte("mamoe/mirai/mirai:10/MIRAI.200122.001/1234567:user/release-keys"),
+	BootId:       []byte("cb886ae2-00b6-4d68-a230-787f111d12c7"),
+	ProcVersion:  []byte("Linux version 3.0.31-cb886ae2 (android-build@xxx.xxx.xxx.xxx.com)"),
+	BaseBand:     []byte{},
+	SimInfo:      []byte("T-Mobile"),
+	OSType:       []byte("android"),
+	MacAddress:   []byte("00:50:56:C0:00:08"),
+	IpAddress:    []byte{10, 0, 1, 3}, // 10.0.1.3
+	WifiBSSID:    []byte("00:50:56:C0:00:08"),
+	WifiSSID:     []byte("<unknown ssid>"),
+	IMEI:         "468356291846738",
+	AndroidId:    []byte("MIRAI.123456.001"),
+	APN:          []byte("wifi"),
+	VendorName:   []byte("MIUI"),
+	VendorOSName: []byte("mirai"),
+	Protocol:     IPad,
 	Version: &Version{
 		Incremental: []byte("5891938"),
 		Release:     []byte("10"),
@@ -159,13 +173,15 @@ func GenRandomDevice() {
 	rand.Read(r)
 	SystemDeviceInfo.Display = []byte("MIRAI." + utils.RandomStringRange(6, NumberRange) + ".001")
 	SystemDeviceInfo.FingerPrint = []byte("mamoe/mirai/mirai:10/MIRAI.200122.001/" + utils.RandomStringRange(7, NumberRange) + ":user/release-keys")
-	SystemDeviceInfo.BootId = []byte(binary.GenUUID(r))
+	SystemDeviceInfo.BootId = binary.GenUUID(r)
 	SystemDeviceInfo.ProcVersion = []byte("Linux version 3.0.31-" + utils.RandomString(8) + " (android-build@xxx.xxx.xxx.xxx.com)")
 	rand.Read(r)
 	t := md5.Sum(r)
 	SystemDeviceInfo.IMSIMd5 = t[:]
-	SystemDeviceInfo.IMEI = utils.RandomStringRange(15, NumberRange)
-	SystemDeviceInfo.AndroidId = SystemDeviceInfo.Display
+	SystemDeviceInfo.IMEI = GenIMEI()
+	r = make([]byte, 8)
+	rand.Read(r)
+	hex.Encode(SystemDeviceInfo.AndroidId, r)
 	SystemDeviceInfo.GenNewGuid()
 	SystemDeviceInfo.GenNewTgtgtKey()
 }
@@ -187,14 +203,14 @@ func genVersionInfo(p ClientProtocol) *versionInfo {
 		}
 	case AndroidWatch:
 		return &versionInfo{
-			ApkId:           "com.tencent.mobileqq",
-			AppId:           537061176,
-			SortVersionName: "8.2.7",
-			BuildTime:       1571193922,
+			ApkId:           "com.tencent.qqlite",
+			AppId:           537064446,
+			SortVersionName: "2.0.5",
+			BuildTime:       1559564731,
 			ApkSign:         []byte{0xA6, 0xB7, 0x45, 0xBF, 0x24, 0xA2, 0xC2, 0x77, 0x52, 0x77, 0x16, 0xF6, 0xF3, 0x6E, 0xB6, 0x8D},
-			SdkVersion:      "6.0.0.2413",
+			SdkVersion:      "6.0.0.236",
 			SSOVersion:      5,
-			MiscBitmap:      184024956,
+			MiscBitmap:      16252796,
 			SubSigmap:       0x10400,
 			MainSigMap:      34869472,
 		}
@@ -249,14 +265,16 @@ func (info *DeviceInfo) ToJson() []byte {
 			Codename:    string(info.Version.CodeName),
 			Sdk:         info.Version.Sdk,
 		},
-		SimInfo:    string(info.SimInfo),
-		OsType:     string(info.OSType),
-		MacAddress: string(info.MacAddress),
-		IpAddress:  []int32{int32(info.IpAddress[0]), int32(info.IpAddress[1]), int32(info.IpAddress[2]), int32(info.IpAddress[3])},
-		WifiBSSID:  string(info.WifiBSSID),
-		WifiSSID:   string(info.WifiSSID),
-		ImsiMd5:    hex.EncodeToString(info.IMSIMd5),
-		Apn:        string(info.APN),
+		SimInfo:      string(info.SimInfo),
+		OsType:       string(info.OSType),
+		MacAddress:   string(info.MacAddress),
+		IpAddress:    []int32{int32(info.IpAddress[0]), int32(info.IpAddress[1]), int32(info.IpAddress[2]), int32(info.IpAddress[3])},
+		WifiBSSID:    string(info.WifiBSSID),
+		WifiSSID:     string(info.WifiSSID),
+		ImsiMd5:      hex.EncodeToString(info.IMSIMd5),
+		Apn:          string(info.APN),
+		VendorName:   string(info.VendorName),
+		VendorOSName: string(info.VendorOSName),
 		Protocol: func() int {
 			switch info.Protocol {
 			case IPad:
@@ -280,30 +298,30 @@ func (info *DeviceInfo) ReadJson(d []byte) error {
 	if err := json.Unmarshal(d, &f); err != nil {
 		return errors.Wrap(err, "failed to unmarshal json message")
 	}
-	SetIfNotEmpty := func(trg []byte, str string) {
+	SetIfNotEmpty := func(trg *[]byte, str string) {
 		if str != "" {
-			trg = []byte(str)
+			*trg = []byte(str)
 		}
 	}
-	SetIfNotEmpty(info.Display, f.Display)
-	SetIfNotEmpty(info.Product, f.Product)
-	SetIfNotEmpty(info.Device, f.Device)
-	SetIfNotEmpty(info.Board, f.Board)
-	SetIfNotEmpty(info.Brand, f.Brand)
-	SetIfNotEmpty(info.Model, f.Model)
-	SetIfNotEmpty(info.Bootloader, f.Bootloader)
-	SetIfNotEmpty(info.FingerPrint, f.FingerPrint)
-	SetIfNotEmpty(info.BootId, f.BootId)
-	SetIfNotEmpty(info.ProcVersion, f.ProcVersion)
-	SetIfNotEmpty(info.BaseBand, f.BaseBand)
-	SetIfNotEmpty(info.SimInfo, f.SimInfo)
-	SetIfNotEmpty(info.OSType, f.OsType)
-	SetIfNotEmpty(info.MacAddress, f.MacAddress)
+	SetIfNotEmpty(&info.Display, f.Display)
+	SetIfNotEmpty(&info.Product, f.Product)
+	SetIfNotEmpty(&info.Device, f.Device)
+	SetIfNotEmpty(&info.Board, f.Board)
+	SetIfNotEmpty(&info.Brand, f.Brand)
+	SetIfNotEmpty(&info.Model, f.Model)
+	SetIfNotEmpty(&info.Bootloader, f.Bootloader)
+	SetIfNotEmpty(&info.FingerPrint, f.FingerPrint)
+	SetIfNotEmpty(&info.BootId, f.BootId)
+	SetIfNotEmpty(&info.ProcVersion, f.ProcVersion)
+	SetIfNotEmpty(&info.BaseBand, f.BaseBand)
+	SetIfNotEmpty(&info.SimInfo, f.SimInfo)
+	SetIfNotEmpty(&info.OSType, f.OsType)
+	SetIfNotEmpty(&info.MacAddress, f.MacAddress)
 	if len(f.IpAddress) == 4 {
 		info.IpAddress = []byte{byte(f.IpAddress[0]), byte(f.IpAddress[1]), byte(f.IpAddress[2]), byte(f.IpAddress[3])}
 	}
-	SetIfNotEmpty(info.WifiBSSID, f.WifiBSSID)
-	SetIfNotEmpty(info.WifiSSID, f.WifiSSID)
+	SetIfNotEmpty(&info.WifiBSSID, f.WifiBSSID)
+	SetIfNotEmpty(&info.WifiSSID, f.WifiSSID)
 	if len(f.ImsiMd5) != 0 {
 		imsiMd5, err := hex.DecodeString(f.ImsiMd5)
 		if err != nil {
@@ -313,11 +331,14 @@ func (info *DeviceInfo) ReadJson(d []byte) error {
 	if f.IMEI != "" {
 		info.IMEI = f.IMEI
 	}
-	SetIfNotEmpty(info.AndroidId, f.AndroidId)
-	SetIfNotEmpty(info.APN, f.Apn)
+	SetIfNotEmpty(&info.APN, f.Apn)
+	SetIfNotEmpty(&info.VendorName, f.VendorName)
+	SetIfNotEmpty(&info.VendorOSName, f.VendorOSName)
 
-	info.AndroidId = info.Display // 兼容旧的
-	SetIfNotEmpty(info.AndroidId, f.Display)
+	SetIfNotEmpty(&info.AndroidId, f.AndroidId)
+	if f.AndroidId == "" {
+		info.AndroidId = info.Display // ?
+	}
 
 	switch f.Protocol {
 	case 1:
@@ -365,6 +386,29 @@ func (info *DeviceInfo) GenDeviceInfoData() []byte {
 	return data
 }
 
+func GenIMEI() string {
+	sum := 0 // the control sum of digits
+	var final strings.Builder
+
+	randSrc := rand.NewSource(time.Now().UnixNano())
+	randGen := rand.New(randSrc)
+
+	for i := 0; i < 14; i++ { // generating all the base digits
+		toAdd := randGen.Intn(10)
+		if (i+1)%2 == 0 { // special proc for every 2nd one
+			toAdd *= 2
+			if toAdd >= 10 {
+				toAdd = (toAdd % 10) + 1
+			}
+		}
+		sum += toAdd
+		final.WriteString(fmt.Sprintf("%d", toAdd)) // and even printing them here!
+	}
+	var ctrlDigit = (sum * 9) % 10 // calculating the control digit
+	final.WriteString(fmt.Sprintf("%d", ctrlDigit))
+	return final.String()
+}
+
 func getSSOAddress() ([]*net.TCPAddr, error) {
 	protocol := genVersionInfo(SystemDeviceInfo.Protocol)
 	key, _ := hex.DecodeString("F0441F5FF42DA58FDCF7949ABA62D411")
@@ -374,11 +418,11 @@ func getSSOAddress() ([]*net.TCPAddr, error) {
 					WriteInt32(int32(protocol.AppId), 6).WriteString(SystemDeviceInfo.IMEI, 7).
 					WriteInt64(0, 8).WriteInt64(0, 9).WriteInt64(0, 10).
 					WriteInt64(0, 11).WriteByte(0, 12).WriteInt64(0, 13).WriteByte(1, 14).Bytes()
-	buf := &jce.RequestDataVersion2{
-		Map: map[string]map[string][]byte{"HttpServerListReq": {"ConfigHttp.HttpServerListReq": packUniRequestData(payload)}},
+	buf := &jce.RequestDataVersion3{
+		Map: map[string][]byte{"HttpServerListReq": packUniRequestData(payload)},
 	}
 	pkt := &jce.RequestPacket{
-		IVersion:     2,
+		IVersion:     3,
 		SServantName: "ConfigHttp",
 		SFuncName:    "HttpServerListReq",
 		SBuffer:      buf.ToBytes(),
@@ -393,13 +437,13 @@ func getSSOAddress() ([]*net.TCPAddr, error) {
 		return nil, errors.Wrap(err, "unable to fetch server list")
 	}
 	rspPkt := &jce.RequestPacket{}
-	data := &jce.RequestDataVersion2{}
+	data := &jce.RequestDataVersion3{}
 	rspPkt.ReadFrom(jce.NewJceReader(tea.Decrypt(rsp)[4:]))
 	data.ReadFrom(jce.NewJceReader(rspPkt.SBuffer))
-	reader := jce.NewJceReader(data.Map["HttpServerListRes"]["ConfigHttp.HttpServerListRes"][1:])
+	reader := jce.NewJceReader(data.Map["HttpServerListRes"][1:])
 	servers := []jce.SsoServerInfo{}
 	reader.ReadSlice(&servers, 2)
-	var adds []*net.TCPAddr
+	var adds = make([]*net.TCPAddr, 0, len(servers))
 	for _, s := range servers {
 		if strings.Contains(s.Server, "com") {
 			continue
@@ -441,9 +485,10 @@ func (c *QQClient) parsePrivateMessage(msg *msg.Message) *message.PrivateMessage
 	}
 	ret := &message.PrivateMessage{
 		Id:     msg.Head.GetMsgSeq(),
-		Target: c.Uin,
+		Target: msg.Head.GetToUin(),
 		Time:   msg.Head.GetMsgTime(),
 		Sender: sender,
+		Self:   c.Uin,
 		Elements: func() []message.IMessageElement {
 			if msg.Body.RichText.Ptt != nil {
 				return []message.IMessageElement{
@@ -465,165 +510,31 @@ func (c *QQClient) parsePrivateMessage(msg *msg.Message) *message.PrivateMessage
 }
 
 func (c *QQClient) parseTempMessage(msg *msg.Message) *message.TempMessage {
+	var groupCode int64
+	var groupName string
 	group := c.FindGroupByUin(msg.Head.C2CTmpMsgHead.GetGroupUin())
-	mem := group.FindMember(msg.Head.GetFromUin())
 	sender := &message.Sender{
 		Uin:      msg.Head.GetFromUin(),
 		Nickname: "Unknown",
 		IsFriend: false,
 	}
-	if mem != nil {
-		sender.Nickname = mem.Nickname
-		sender.CardName = mem.CardName
+	if group != nil {
+		groupCode = group.Code
+		groupName = group.Name
+		mem := group.FindMember(msg.Head.GetFromUin())
+		if mem != nil {
+			sender.Nickname = mem.Nickname
+			sender.CardName = mem.CardName
+		}
 	}
 	return &message.TempMessage{
 		Id:        msg.Head.GetMsgSeq(),
-		GroupCode: group.Code,
-		GroupName: group.Name,
+		GroupCode: groupCode,
+		GroupName: groupName,
+		Self:      c.Uin,
 		Sender:    sender,
 		Elements:  message.ParseMessageElems(msg.Body.RichText.Elems),
 	}
-}
-
-func (c *QQClient) parseGroupMessage(m *msg.Message) *message.GroupMessage {
-	group := c.FindGroup(m.Head.GroupInfo.GetGroupCode())
-	if group == nil {
-		c.Debug("sync group %v.", m.Head.GroupInfo.GetGroupCode())
-		info, err := c.GetGroupInfo(m.Head.GroupInfo.GetGroupCode())
-		if err != nil {
-			c.Error("error to sync group %v : %+v", m.Head.GroupInfo.GetGroupCode(), err)
-			return nil
-		}
-		group = info
-		c.GroupList = append(c.GroupList, info)
-	}
-	if len(group.Members) == 0 {
-		mem, err := c.GetGroupMembers(group)
-		if err != nil {
-			c.Error("error to sync group %v member : %+v", m.Head.GroupInfo.GroupCode, err)
-			return nil
-		}
-		group.Members = mem
-	}
-	var anonInfo *msg.AnonymousGroupMessage
-	for _, e := range m.Body.RichText.Elems {
-		if e.AnonGroupMsg != nil {
-			anonInfo = e.AnonGroupMsg
-		}
-	}
-	var sender *message.Sender
-	if anonInfo != nil {
-		sender = &message.Sender{
-			Uin:      80000000,
-			Nickname: string(anonInfo.AnonNick),
-			AnonymousInfo: &message.AnonymousInfo{
-				AnonymousId:   base64.StdEncoding.EncodeToString(anonInfo.AnonId),
-				AnonymousNick: string(anonInfo.AnonNick),
-			},
-			IsFriend: false,
-		}
-	} else {
-		mem := group.FindMember(m.Head.GetFromUin())
-		if mem == nil {
-			group.Update(func(_ *GroupInfo) {
-				if mem = group.FindMemberWithoutLock(m.Head.GetFromUin()); mem != nil {
-					return
-				}
-				info, _ := c.getMemberInfo(group.Code, m.Head.GetFromUin())
-				if info == nil {
-					return
-				}
-				mem = info
-				group.Members = append(group.Members, mem)
-				go c.dispatchNewMemberEvent(&MemberJoinGroupEvent{
-					Group:  group,
-					Member: info,
-				})
-			})
-			if mem == nil {
-				return nil
-			}
-		}
-		sender = &message.Sender{
-			Uin:      mem.Uin,
-			Nickname: mem.Nickname,
-			CardName: mem.CardName,
-			IsFriend: c.FindFriend(mem.Uin) != nil,
-		}
-	}
-	var g *message.GroupMessage
-	g = &message.GroupMessage{
-		Id:             m.Head.GetMsgSeq(),
-		GroupCode:      group.Code,
-		GroupName:      string(m.Head.GroupInfo.GroupName),
-		Sender:         sender,
-		Time:           m.Head.GetMsgTime(),
-		Elements:       message.ParseMessageElems(m.Body.RichText.Elems),
-		OriginalObject: m,
-	}
-	var extInfo *msg.ExtraInfo
-	// pre parse
-	for _, elem := range m.Body.RichText.Elems {
-		// is rich long msg
-		if elem.GeneralFlags != nil && elem.GeneralFlags.GetLongTextResid() != "" {
-			if f := c.GetForwardMessage(elem.GeneralFlags.GetLongTextResid()); f != nil && len(f.Nodes) == 1 {
-				g = &message.GroupMessage{
-					Id:             m.Head.GetMsgSeq(),
-					GroupCode:      group.Code,
-					GroupName:      string(m.Head.GroupInfo.GroupName),
-					Sender:         sender,
-					Time:           m.Head.GetMsgTime(),
-					Elements:       f.Nodes[0].Message,
-					OriginalObject: m,
-				}
-			}
-		}
-		if elem.ExtraInfo != nil {
-			extInfo = elem.ExtraInfo
-		}
-	}
-	if !sender.IsAnonymous() {
-		mem := group.FindMember(m.Head.GetFromUin())
-		groupCard := m.Head.GroupInfo.GetGroupCard()
-		if extInfo != nil && len(extInfo.GroupCard) > 0 && extInfo.GroupCard[0] == 0x0A {
-			buf := oidb.D8FCCommCardNameBuf{}
-			if err := proto.Unmarshal(extInfo.GroupCard, &buf); err == nil && len(buf.RichCardName) > 0 {
-				groupCard = ""
-				for _, e := range buf.RichCardName {
-					groupCard += string(e.Text)
-				}
-			}
-		}
-		if m.Head.GroupInfo != nil && groupCard != "" && mem.CardName != groupCard {
-			old := mem.CardName
-			if mem.Nickname == groupCard {
-				mem.CardName = ""
-			} else {
-				mem.CardName = groupCard
-			}
-			if old != mem.CardName {
-				go c.dispatchMemberCardUpdatedEvent(&MemberCardUpdatedEvent{
-					Group:   group,
-					OldCard: old,
-					Member:  mem,
-				})
-			}
-		}
-	}
-	if m.Body.RichText.Ptt != nil {
-		g.Elements = []message.IMessageElement{
-			&message.VoiceElement{
-				Name: m.Body.RichText.Ptt.GetFileName(),
-				Md5:  m.Body.RichText.Ptt.FileMd5,
-				Size: m.Body.RichText.Ptt.GetFileSize(),
-				Url:  "http://grouptalk.c2c.qq.com" + string(m.Body.RichText.Ptt.DownPara),
-			},
-		}
-	}
-	if m.Body.RichText.Attr != nil {
-		g.InternalId = m.Body.RichText.Attr.GetRandom()
-	}
-	return g
 }
 
 func (b *groupMessageBuilder) build() *msg.Message {
@@ -649,9 +560,9 @@ func XmlEscape(c string) string {
 	return buf.String()
 }
 
-func genForwardTemplate(resId, preview, title, brief, source, summary string, ts int64, items []*msg.PbMultiMsgItem) *message.ForwardElement {
+func genForwardTemplate(resID, preview, title, brief, source, summary string, ts int64, items []*msg.PbMultiMsgItem) *message.ForwardElement {
 	template := fmt.Sprintf(`<?xml version='1.0' encoding='UTF-8'?><msg serviceID="35" templateID="1" action="viewMultiMsg" brief="%s" m_resid="%s" m_fileName="%d" tSum="3" sourceMsgId="0" url="" flag="3" adverSign="0" multiMsgFlag="0"><item layout="1"><title color="#000000" size="34">%s</title> %s<hr></hr><summary size="26" color="#808080">%s</summary></item><source name="%s"></source></msg>`,
-		brief, resId, ts, title, preview, summary, source,
+		brief, resID, ts, title, preview, summary, source,
 	)
 	for _, item := range items {
 		if item.GetFileName() == "MultiMsg" {
@@ -661,12 +572,12 @@ func genForwardTemplate(resId, preview, title, brief, source, summary string, ts
 	return &message.ForwardElement{
 		FileName: strconv.FormatInt(ts, 10),
 		Content:  template,
-		ResId:    resId,
+		ResId:    resID,
 		Items:    items,
 	}
 }
 
-func genLongTemplate(resId, brief string, ts int64) *message.ServiceElement {
+func genLongTemplate(resID, brief string, ts int64) *message.ServiceElement {
 	limited := func() string {
 		if len(brief) > 30 {
 			return brief[:30] + "…"
@@ -674,14 +585,52 @@ func genLongTemplate(resId, brief string, ts int64) *message.ServiceElement {
 		return brief
 	}()
 	template := fmt.Sprintf(`<?xml version='1.0' encoding='UTF-8' standalone='yes' ?><msg serviceID="35" templateID="1" action="viewMultiMsg" brief="%s" m_resid="%s" m_fileName="%d" sourceMsgId="0" url="" flag="3" adverSign="0" multiMsgFlag="1"> <item layout="1"> <title>%s</title> <hr hidden="false" style="0"/> <summary>点击查看完整消息</summary> </item> <source name="聊天记录" icon="" action="" appid="-1"/> </msg>`,
-		XmlEscape(limited), resId, ts, XmlEscape(limited),
+		XmlEscape(limited), resID, ts, XmlEscape(limited),
 	)
 	return &message.ServiceElement{
 		Id:      35,
 		Content: template,
-		ResId:   resId,
+		ResId:   resID,
 		SubType: "Long",
 	}
+}
+
+func (p requestParams) bool(k string) bool {
+	if p == nil {
+		return false
+	}
+	i, ok := p[k]
+	if !ok {
+		return false
+	}
+	return i.(bool)
+}
+
+func (p requestParams) int32(k string) int32 {
+	if p == nil {
+		return 0
+	}
+	i, ok := p[k]
+	if !ok {
+		return 0
+	}
+	return i.(int32)
+}
+
+func (c *QQClient) packOIDBPackage(cmd, serviceType int32, body []byte) []byte {
+	pkg := &oidb.OIDBSSOPkg{
+		Command:       cmd,
+		ServiceType:   serviceType,
+		Bodybuffer:    body,
+		ClientVersion: "Android " + c.version.SortVersionName,
+	}
+	r, _ := proto.Marshal(pkg)
+	return r
+}
+
+func (c *QQClient) packOIDBPackageProto(cmd, serviceType int32, msg proto.Message) []byte {
+	b, _ := proto.Marshal(msg)
+	return c.packOIDBPackage(cmd, serviceType, b)
 }
 
 func (c *QQClient) Error(msg string, args ...interface{}) {

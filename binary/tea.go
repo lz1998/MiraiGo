@@ -1,8 +1,8 @@
 package binary
 
 import (
-	"crypto/rand"
 	"encoding/binary"
+	"math/rand"
 	"reflect"
 	"unsafe"
 )
@@ -17,9 +17,7 @@ func isZero(a []byte) bool { // MAGIC
 	return *(*uint64)(unsafe.Pointer((*reflect.SliceHeader)(unsafe.Pointer(&a)).Data)) == 0
 }
 
-type TEA struct {
-	key [4]uint32
-}
+type TEA [4]uint32
 
 // http://bbs.chinaunix.net/thread-583468-1-1.html
 // 感谢xichen大佬对TEA的解释
@@ -115,14 +113,31 @@ func repack(data []byte, v0, v1 uint32) {
 	data[7] = byte(v1)
 }
 
+var sumTable = [0x10]uint32{
+	0x9e3779b9,
+	0x3c6ef372,
+	0xdaa66d2b,
+	0x78dde6e4,
+	0x1715609d,
+	0xb54cda56,
+	0x5384540f,
+	0xf1bbcdc8,
+	0x8ff34781,
+	0x2e2ac13a,
+	0xcc623af3,
+	0x6a99b4ac,
+	0x08d12e65,
+	0xa708a81e,
+	0x454021d7,
+	0xe3779b90,
+}
+
 //go:nosplit
 func (t *TEA) encode(src, dst []byte) {
-	var sum uint32
 	v0, v1 := unpack(src)
 	for i := 0; i < 0x10; i++ {
-		sum += 0x9E3779B9
-		v0 += ((v1 << 4) + t.key[0]) ^ (v1 + sum) ^ ((v1 >> 5) + t.key[1])
-		v1 += ((v0 << 4) + t.key[2]) ^ (v0 + sum) ^ ((v0 >> 5) + t.key[3])
+		v0 += ((v1 << 4) + t[0]) ^ (v1 + sumTable[i]) ^ ((v1 >> 5) + t[1])
+		v1 += ((v0 << 4) + t[2]) ^ (v0 + sumTable[i]) ^ ((v0 >> 5) + t[3])
 	}
 	repack(dst, v0, v1)
 }
@@ -130,12 +145,10 @@ func (t *TEA) encode(src, dst []byte) {
 // 每次8字节
 //go:nosplit
 func (t *TEA) decode(src, dst []byte) {
-	var sum uint32 = 0xE3779B90 // 预计算一次
 	v0, v1 := unpack(src)
-	for i := 0; i < 0x10; i++ {
-		v1 -= ((v0 << 4) + t.key[2]) ^ (v0 + sum) ^ ((v0 >> 5) + t.key[3])
-		v0 -= ((v1 << 4) + t.key[0]) ^ (v1 + sum) ^ ((v1 >> 5) + t.key[1])
-		sum -= 0x9E3779B9
+	for i := 0xf; i >= 0; i-- {
+		v1 -= ((v0 << 4) + t[2]) ^ (v0 + sumTable[i]) ^ ((v0 >> 5) + t[3])
+		v0 -= ((v1 << 4) + t[0]) ^ (v1 + sumTable[i]) ^ ((v1 >> 5) + t[1])
 	}
 	repack(dst, v0, v1)
 }
@@ -146,9 +159,9 @@ func NewTeaCipher(key []byte) *TEA {
 		return nil
 	}
 	t := new(TEA)
-	t.key[3] = binary.BigEndian.Uint32(key[12:])
-	t.key[2] = binary.BigEndian.Uint32(key[8:])
-	t.key[1] = binary.BigEndian.Uint32(key[4:])
-	t.key[0] = binary.BigEndian.Uint32(key[0:])
+	t[3] = binary.BigEndian.Uint32(key[12:])
+	t[2] = binary.BigEndian.Uint32(key[8:])
+	t[1] = binary.BigEndian.Uint32(key[4:])
+	t[0] = binary.BigEndian.Uint32(key[0:])
 	return t
 }

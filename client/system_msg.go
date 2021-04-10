@@ -33,19 +33,27 @@ type (
 		GroupCode     int64  `json:"group_id"`
 		GroupName     string `json:"group_name"`
 
-		Checked bool  `json:"checked"`
-		Actor   int64 `json:"actor"`
+		Checked    bool  `json:"checked"`
+		Actor      int64 `json:"actor"`
+		Suspicious bool  `json:"suspicious"`
 
 		client *QQClient
 	}
 )
 
 func (c *QQClient) GetGroupSystemMessages() (*GroupSystemMessages, error) {
-	i, err := c.sendAndWait(c.buildSystemMsgNewGroupPacket())
+	i, err := c.sendAndWait(c.buildSystemMsgNewGroupPacket(false))
 	if err != nil {
 		return nil, err
 	}
-	return i.(*GroupSystemMessages), nil
+	msg := i.(*GroupSystemMessages)
+	i, err = c.sendAndWait(c.buildSystemMsgNewGroupPacket(true))
+	if err != nil {
+		return nil, err
+	}
+	msg.InvitedRequests = append(msg.InvitedRequests, i.(*GroupSystemMessages).InvitedRequests...)
+	msg.JoinRequests = append(msg.JoinRequests, i.(*GroupSystemMessages).JoinRequests...)
+	return msg, nil
 }
 
 func (c *QQClient) exceptAndDispatchGroupSysMsg() {
@@ -88,7 +96,7 @@ func (c *QQClient) exceptAndDispatchGroupSysMsg() {
 }
 
 // ProfileService.Pb.ReqSystemMsgNew.Group
-func (c *QQClient) buildSystemMsgNewGroupPacket() (uint16, []byte) {
+func (c *QQClient) buildSystemMsgNewGroupPacket(suspicious bool) (uint16, []byte) {
 	seq := c.nextSeq()
 	req := &structmsg.ReqSystemMsgNew{
 		MsgNum:    100,
@@ -113,14 +121,86 @@ func (c *QQClient) buildSystemMsgNewGroupPacket() (uint16, []byte) {
 			GrpMsgGetC2CInviteJoinGroup:       1,
 		},
 		FriendMsgTypeFlag: 1,
+		ReqMsgType: func() int32 {
+			if suspicious {
+				return 2
+			}
+			return 1
+		}(),
 	}
 	payload, _ := proto.Marshal(req)
 	packet := packets.BuildUniPacket(c.Uin, seq, "ProfileService.Pb.ReqSystemMsgNew.Group", 1, c.OutGoingPacketSessionId, EmptyBytes, c.sigInfo.d2Key, payload)
 	return seq, packet
 }
 
+// ProfileService.Pb.ReqSystemMsgAction.Group
+func (c *QQClient) buildSystemMsgGroupActionPacket(reqID, requester, group int64, msgType int32, isInvite, accept, block bool, reason string) (uint16, []byte) {
+	seq := c.nextSeq()
+	req := &structmsg.ReqSystemMsgAction{
+		MsgType: msgType,
+		MsgSeq:  reqID,
+		ReqUin:  requester,
+		SubType: 1,
+		SrcId:   3,
+		SubSrcId: func() int32 {
+			if isInvite {
+				return 10016
+			}
+			return 31
+		}(),
+		GroupMsgType: func() int32 {
+			if isInvite {
+				return 2
+			}
+			return 1
+		}(),
+		ActionInfo: &structmsg.SystemMsgActionInfo{
+			Type: func() int32 {
+				if accept {
+					return 11
+				}
+				return 12
+			}(),
+			GroupCode: group,
+			Blacklist: block,
+			Msg:       reason,
+			Sig:       EmptyBytes,
+		},
+		Language: 1000,
+	}
+	payload, _ := proto.Marshal(req)
+	packet := packets.BuildUniPacket(c.Uin, seq, "ProfileService.Pb.ReqSystemMsgAction.Group", 1, c.OutGoingPacketSessionId, EmptyBytes, c.sigInfo.d2Key, payload)
+	return seq, packet
+}
+
+// ProfileService.Pb.ReqSystemMsgAction.Friend
+func (c *QQClient) buildSystemMsgFriendActionPacket(reqID, requester int64, accept bool) (uint16, []byte) {
+	seq := c.nextSeq()
+	req := &structmsg.ReqSystemMsgAction{
+		MsgType:  1,
+		MsgSeq:   reqID,
+		ReqUin:   requester,
+		SubType:  1,
+		SrcId:    6,
+		SubSrcId: 7,
+		ActionInfo: &structmsg.SystemMsgActionInfo{
+			Type: func() int32 {
+				if accept {
+					return 2
+				}
+				return 3
+			}(),
+			Blacklist:    false,
+			AddFrdSNInfo: &structmsg.AddFrdSNInfo{},
+		},
+	}
+	payload, _ := proto.Marshal(req)
+	packet := packets.BuildUniPacket(c.Uin, seq, "ProfileService.Pb.ReqSystemMsgAction.Friend", 1, c.OutGoingPacketSessionId, EmptyBytes, c.sigInfo.d2Key, payload)
+	return seq, packet
+}
+
 // ProfileService.Pb.ReqSystemMsgNew.Group
-func decodeSystemMsgGroupPacket(c *QQClient, _ uint16, payload []byte) (interface{}, error) {
+func decodeSystemMsgGroupPacket(c *QQClient, _ *incomingPacketInfo, payload []byte) (interface{}, error) {
 	rsp := structmsg.RspSystemMsgNew{}
 	if err := proto.Unmarshal(payload, &rsp); err != nil {
 		return nil, err
@@ -143,6 +223,7 @@ func decodeSystemMsgGroupPacket(c *QQClient, _ uint16, payload []byte) (interfac
 					GroupName:     st.Msg.GroupName,
 					Checked:       st.Msg.SubType == 2,
 					Actor:         st.Msg.ActorUin,
+					Suspicious:    len(st.Msg.WarningTips) > 0,
 					client:        c,
 				})
 			case 2: // 被邀请
@@ -166,6 +247,7 @@ func decodeSystemMsgGroupPacket(c *QQClient, _ uint16, payload []byte) (interfac
 					GroupName:     st.Msg.GroupName,
 					Checked:       st.Msg.SubType == 2,
 					Actor:         st.Msg.ActorUin,
+					Suspicious:    len(st.Msg.WarningTips) > 0,
 					client:        c,
 				})
 			default:

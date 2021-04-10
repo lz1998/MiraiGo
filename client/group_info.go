@@ -2,33 +2,40 @@ package client
 
 import (
 	"fmt"
+	"math/rand"
+	"net/url"
+	"sort"
+	"strings"
+	"sync"
+
 	"github.com/Mrs4s/MiraiGo/binary"
 	"github.com/Mrs4s/MiraiGo/binary/jce"
 	"github.com/Mrs4s/MiraiGo/client/pb/oidb"
+	"github.com/Mrs4s/MiraiGo/client/pb/profilecard"
 	"github.com/Mrs4s/MiraiGo/protocol/packets"
 	"github.com/Mrs4s/MiraiGo/utils"
 	"github.com/pkg/errors"
-	"github.com/tidwall/gjson"
 	"google.golang.org/protobuf/proto"
-	"net/url"
-	"strings"
-	"sync"
 )
 
 type (
 	GroupInfo struct {
-		Uin            int64
-		Code           int64
-		Name           string
-		Memo           string
-		OwnerUin       int64
-		MemberCount    uint16
-		MaxMemberCount uint16
-		Members        []*GroupMemberInfo
+		Uin             int64
+		Code            int64
+		Name            string
+		Memo            string
+		OwnerUin        int64
+		GroupCreateTime uint32
+		GroupLevel      uint32
+		MemberCount     uint16
+		MaxMemberCount  uint16
+		Members         []*GroupMemberInfo
+		// 最后一条信息的SEQ,只有通过 GetGroupInfo 函数获取的 GroupInfo 才会有
+		LastMsgSeq int64
 
-		client     *QQClient
-		lastMsgSeq int64
-		lock       sync.RWMutex
+		client *QQClient
+
+		lock sync.RWMutex
 	}
 
 	GroupMemberInfo struct {
@@ -43,6 +50,13 @@ type (
 		SpecialTitle           string
 		SpecialTitleExpireTime int64
 		Permission             MemberPermission
+	}
+
+	// GroupSearchInfo 通过搜索得到的群信息
+	GroupSearchInfo struct {
+		Code int64  // 群号
+		Name string // 群名
+		Memo string // 简介
 	}
 )
 
@@ -108,14 +122,51 @@ func (c *QQClient) buildGroupInfoRequestPacket(groupCode int64) (uint16, []byte)
 	return seq, packet
 }
 
+// SearchGroupByKeyword 通过关键词搜索陌生群组
+func (c *QQClient) SearchGroupByKeyword(keyword string) ([]GroupSearchInfo, error) {
+	rsp, err := c.sendAndWait(c.buildGroupSearchPacket(keyword))
+	if err != nil {
+		return nil, errors.Wrap(err, "group search failed")
+	}
+	return rsp.([]GroupSearchInfo), nil
+}
+
 // SummaryCard.ReqSearch
 func (c *QQClient) buildGroupSearchPacket(keyword string) (uint16, []byte) {
 	seq := c.nextSeq()
+	comm, _ := proto.Marshal(&profilecard.BusiComm{
+		Ver:      proto.Int32(1),
+		Seq:      proto.Int32(rand.Int31()),
+		Service:  proto.Int32(80000001),
+		Platform: proto.Int32(2),
+		Qqver:    proto.String("8.5.0.5025"),
+		Build:    proto.Int32(5025),
+	})
+	search, _ := proto.Marshal(&profilecard.AccountSearch{
+		Start:     proto.Int32(0),
+		End:       proto.Uint32(4),
+		Keyword:   &keyword,
+		Highlight: []string{keyword},
+		UserLocation: &profilecard.Location{
+			Latitude:  proto.Float64(0),
+			Longitude: proto.Float64(0),
+		},
+		Filtertype: proto.Int32(0),
+	})
 	req := &jce.SummaryCardReqSearch{
 		Keyword:     keyword,
 		CountryCode: "+86",
 		Version:     3,
-		ReqServices: [][]byte{},
+		ReqServices: [][]byte{
+			binary.NewWriterF(func(w *binary.Writer) {
+				w.WriteByte(0x28)
+				w.WriteUInt32(uint32(len(comm)))
+				w.WriteUInt32(uint32(len(search)))
+				w.Write(comm)
+				w.Write(search)
+				w.WriteByte(0x29)
+			}),
+		},
 	}
 	head := jce.NewJceWriter()
 	head.WriteInt32(2, 0)
@@ -136,7 +187,7 @@ func (c *QQClient) buildGroupSearchPacket(keyword string) (uint16, []byte) {
 }
 
 // SummaryCard.ReqSearch
-func decodeGroupSearchResponse(c *QQClient, _ uint16, payload []byte) (interface{}, error) {
+func decodeGroupSearchResponse(_ *QQClient, _ *incomingPacketInfo, payload []byte) (interface{}, error) {
 	request := &jce.RequestPacket{}
 	request.ReadFrom(jce.NewJceReader(payload))
 	data := &jce.RequestDataVersion2{}
@@ -153,13 +204,27 @@ func decodeGroupSearchResponse(c *QQClient, _ uint16, payload []byte) (interface
 	ld2 := sr.ReadInt32()
 	if ld1 > 0 && ld2+9 < int32(len(rspService)) {
 		sr.ReadBytes(int(ld1)) // busi comm
-		//searchPb := sr.ReadBytes(int(ld2)) //TODO: search pb decode
+		searchPb := sr.ReadBytes(int(ld2))
+		searchRsp := profilecard.AccountSearch{}
+		err := proto.Unmarshal(searchPb, &searchRsp)
+		if err != nil {
+			return nil, errors.Wrap(err, "get search result failed")
+		}
+		var ret []GroupSearchInfo
+		for _, g := range searchRsp.GetList() {
+			ret = append(ret, GroupSearchInfo{
+				Code: int64(g.GetCode()),
+				Name: g.GetName(),
+				Memo: g.GetBrief(),
+			})
+		}
+		return ret, nil
 	}
 	return nil, nil
 }
 
 // OidbSvc.0x88d_0
-func decodeGroupInfoResponse(c *QQClient, _ uint16, payload []byte) (interface{}, error) {
+func decodeGroupInfoResponse(c *QQClient, _ *incomingPacketInfo, payload []byte) (interface{}, error) {
 	pkg := oidb.OIDBSSOPkg{}
 	rsp := oidb.D88DRspBody{}
 	if err := proto.Unmarshal(payload, &pkg); err != nil {
@@ -176,16 +241,18 @@ func decodeGroupInfoResponse(c *QQClient, _ uint16, payload []byte) (interface{}
 		return nil, errors.New("group info not found")
 	}
 	return &GroupInfo{
-		Uin:            int64(*info.GroupInfo.GroupUin),
-		Code:           int64(*info.GroupCode),
-		Name:           string(info.GroupInfo.GroupName),
-		Memo:           string(info.GroupInfo.GroupMemo),
-		OwnerUin:       int64(*info.GroupInfo.GroupOwner),
-		MemberCount:    uint16(*info.GroupInfo.GroupMemberNum),
-		MaxMemberCount: uint16(*info.GroupInfo.GroupMemberMaxNum),
-		Members:        []*GroupMemberInfo{},
-		lastMsgSeq:     int64(info.GroupInfo.GetGroupCurMsgSeq()),
-		client:         c,
+		Uin:             int64(*info.GroupInfo.GroupUin),
+		Code:            int64(*info.GroupCode),
+		Name:            string(info.GroupInfo.GroupName),
+		Memo:            string(info.GroupInfo.GroupMemo),
+		GroupCreateTime: *info.GroupInfo.GroupCreateTime,
+		GroupLevel:      *info.GroupInfo.GroupLevel,
+		OwnerUin:        int64(*info.GroupInfo.GroupOwner),
+		MemberCount:     uint16(*info.GroupInfo.GroupMemberNum),
+		MaxMemberCount:  uint16(*info.GroupInfo.GroupMemberMaxNum),
+		Members:         []*GroupMemberInfo{},
+		LastMsgSeq:      int64(info.GroupInfo.GetGroupCurMsgSeq()),
+		client:          c,
 	}, nil
 }
 
@@ -221,18 +288,19 @@ func (g *GroupInfo) MuteAnonymous(id, nick string, seconds int32) error {
 	if err != nil {
 		return errors.Wrap(err, "failed to request blacklist")
 	}
-	j := gjson.ParseBytes(rsp)
-	if r := j.Get("retcode"); r.Exists() {
-		if r.Int() != 0 {
-			return errors.Errorf("retcode %v", r.Int())
-		}
-		return nil
+	var muteResp struct {
+		RetCode int `json:"retcode"`
+		CGICode int `json:"cgicode"`
 	}
-	if r := j.Get("cgicode"); r.Exists() {
-		if r.Int() != 0 {
-			return errors.Errorf("retcode %v", r.Int())
-		}
-		return nil
+	err = json.Unmarshal(rsp, &muteResp)
+	if err != nil {
+		return errors.Wrap(err, "failed to parse muteResp")
+	}
+	if muteResp.RetCode != 0 {
+		return errors.Errorf("retcode %v", muteResp.RetCode)
+	}
+	if muteResp.CGICode != 0 {
+		return errors.Errorf("retcode %v", muteResp.CGICode)
 	}
 	return nil
 }
@@ -262,13 +330,20 @@ func (g *GroupInfo) FindMember(uin int64) *GroupMemberInfo {
 }
 
 func (g *GroupInfo) FindMemberWithoutLock(uin int64) *GroupMemberInfo {
-	for _, m := range g.Members {
-		f := m
-		if f.Uin == uin {
-			return f
-		}
+	i := sort.Search(len(g.Members), func(i int) bool {
+		return g.Members[i].Uin >= uin
+	})
+	if i >= len(g.Members) || g.Members[i].Uin != uin {
+		return nil
 	}
-	return nil
+	return g.Members[i]
+}
+
+// sort call this method must hold the lock
+func (g *GroupInfo) sort() {
+	sort.Slice(g.Members, func(i, j int) bool {
+		return g.Members[i].Uin < g.Members[j].Uin
+	})
 }
 
 func (g *GroupInfo) Update(f func(*GroupInfo)) {
@@ -298,7 +373,7 @@ func (m *GroupMemberInfo) EditCard(card string) {
 }
 
 func (m *GroupMemberInfo) Poke() {
-	m.Group.client.sendGroupPoke(m.Group.Code, m.Uin)
+	m.Group.client.SendGroupPoke(m.Group.Code, m.Uin)
 }
 
 func (m *GroupMemberInfo) SetAdmin(flag bool) {
@@ -314,17 +389,24 @@ func (m *GroupMemberInfo) EditSpecialTitle(title string) {
 	}
 }
 
-func (m *GroupMemberInfo) Kick(msg string, block bool) {
+func (m *GroupMemberInfo) Kick(msg string, block bool) error {
 	if m.Uin != m.Group.client.Uin && m.Manageable() {
 		m.Group.client.kickGroupMember(m.Group.Code, m.Uin, msg, block)
+		return nil
+	} else {
+		return errors.New("not manageable")
 	}
 }
 
-func (m *GroupMemberInfo) Mute(time uint32) {
+func (m *GroupMemberInfo) Mute(time uint32) error {
+	if time >= 2592000 {
+		return errors.New("time is not in range")
+	}
 	if m.Uin != m.Group.client.Uin && m.Manageable() {
-		if time < 2592000 {
-			m.Group.client.groupMute(m.Group.Code, m.Uin, time)
-		}
+		m.Group.client.groupMute(m.Group.Code, m.Uin, time)
+		return nil
+	} else {
+		return errors.New("not manageable")
 	}
 }
 

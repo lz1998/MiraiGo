@@ -12,13 +12,16 @@ import (
 	"github.com/Mrs4s/MiraiGo/client/pb/msg"
 	"github.com/Mrs4s/MiraiGo/utils"
 	"github.com/golang/protobuf/proto"
-	"github.com/tidwall/gjson"
+	jsoniter "github.com/json-iterator/go"
 )
+
+var json = jsoniter.ConfigFastest
 
 type (
 	PrivateMessage struct {
 		Id         int32
 		InternalId int32
+		Self       int64
 		Target     int64
 		Time       int32
 		Sender     *Sender
@@ -29,6 +32,7 @@ type (
 		Id        int32
 		GroupCode int64
 		GroupName string
+		Self      int64
 		Sender    *Sender
 		Elements  []IMessageElement
 	}
@@ -60,15 +64,6 @@ type (
 		Message    []IMessageElement
 	}
 
-	RichMessage struct {
-		Title      string
-		Summary    string
-		Brief      string
-		Url        string
-		PictureUrl string
-		MusicUrl   string
-	}
-
 	Sender struct {
 		Uin           int64
 		Nickname      string
@@ -93,6 +88,15 @@ type (
 	ElementType int
 
 	GroupGift int
+)
+
+// MusicType values.
+const (
+	QQMusic    = iota // QQ音乐
+	CloudMusic        // 网易云音乐
+	MiguMusic         // 咪咕音乐
+	KugouMusic        // 酷狗音乐
+	KuwoMusic         // 酷我音乐
 )
 
 const (
@@ -246,7 +250,7 @@ func (msg *SendingMessage) ToFragmented() [][]IMessageElement {
 func EstimateLength(elems []IMessageElement, limit int) int {
 	sum := 0
 	for _, elem := range elems {
-		if sum >= limit {
+		if sum > limit {
 			break
 		}
 		left := int(math.Max(float64(limit-sum), 0))
@@ -258,7 +262,7 @@ func EstimateLength(elems []IMessageElement, limit int) int {
 		case *ReplyElement:
 			sum += 444 + EstimateLength(e.Elements, left)
 		case *ImageElement, *GroupImageElement, *FriendImageElement:
-			sum += 260
+			sum += 100
 		default:
 			sum += utils.ChineseLength(ToReadableString([]IMessageElement{elem}), left)
 		}
@@ -292,6 +296,11 @@ func ToProtoElems(elems []IMessageElement, generalFlags bool) (r []*msg.Elem) {
 					TroopName: []byte{},
 				},
 			})
+			if len(elems) > 1 {
+				if elems[0].Type() == Image || elems[1].Type() == Image {
+					r = append(r, &msg.Elem{Text: &msg.Text{Str: proto.String(" ")}})
+				}
+			}
 		}
 	}
 	for _, elem := range elems {
@@ -452,7 +461,7 @@ func ParseMessageElems(elems []*msg.Elem) []IMessageElement {
 					res = append(res, NewRichXml(content, int64(elem.RichMsg.GetServiceId())))
 					continue
 				} else {
-					if gjson.Valid(content) {
+					if json.Valid(utils.S2B(content)) {
 						res = append(res, NewRichJson(content))
 						continue
 					}
@@ -493,8 +502,9 @@ func ParseMessageElems(elems []*msg.Elem) []IMessageElement {
 			})
 		}
 		if elem.QQWalletMsg != nil && elem.QQWalletMsg.AioBody != nil {
+			// /com/tencent/mobileqq/data/MessageForQQWalletMsg.java#L366
 			msgType := elem.QQWalletMsg.AioBody.GetMsgType()
-			if msgType == 2 || msgType == 3 || msgType == 6 {
+			if msgType <= 1000 && elem.QQWalletMsg.AioBody.RedType != nil {
 				return []IMessageElement{
 					&RedBagElement{
 						MsgType: RedBagMessageType(msgType),
@@ -580,7 +590,7 @@ func (forMsg *ForwardMessage) CalculateValidationDataForward(seq, random int32, 
 }
 
 func (forMsg *ForwardMessage) packForwardMsg(seq int32, random int32, groupCode int64) []*msg.Message {
-	var msgs []*msg.Message
+	var msgs = make([]*msg.Message, 0, len(forMsg.Nodes))
 	for _, node := range forMsg.Nodes {
 		msgs = append(msgs, &msg.Message{
 			Head: &msg.MessageHead{
@@ -633,4 +643,8 @@ func ToReadableString(m []IMessageElement) (r string) {
 		}
 	}
 	return
+}
+
+func FaceNameById(id int) string {
+	return faceMap[id]
 }

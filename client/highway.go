@@ -6,12 +6,8 @@ import (
 	binary2 "encoding/binary"
 	"encoding/hex"
 	"fmt"
-	"github.com/Mrs4s/MiraiGo/binary"
-	"github.com/Mrs4s/MiraiGo/client/pb"
-	"github.com/Mrs4s/MiraiGo/utils"
-	"github.com/pkg/errors"
-	"google.golang.org/protobuf/proto"
 	"io"
+	"io/ioutil"
 	"net"
 	"net/http"
 	"os"
@@ -19,10 +15,16 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/Mrs4s/MiraiGo/binary"
+	"github.com/Mrs4s/MiraiGo/client/pb"
+	"github.com/Mrs4s/MiraiGo/utils"
+	"github.com/pkg/errors"
+	"google.golang.org/protobuf/proto"
 )
 
-func (c *QQClient) highwayUpload(ip uint32, port int, updKey, data []byte, cmdId int32) error {
-	return c.highwayUploadStream(ip, port, updKey, bytes.NewReader(data), cmdId)
+func (c *QQClient) highwayUpload(ip uint32, port int, updKey, data []byte, cmdID int32) error {
+	return c.highwayUploadStream(ip, port, updKey, bytes.NewReader(data), cmdID)
 }
 
 func (c *QQClient) highwayUploadStream(ip uint32, port int, updKey []byte, stream io.ReadSeeker, cmdId int32) error {
@@ -46,10 +48,10 @@ func (c *QQClient) highwayUploadStream(ip uint32, port int, updKey []byte, strea
 	for {
 		chunk := make([]byte, chunkSize)
 		rl, err := io.ReadFull(stream, chunk)
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
-		if err == io.ErrUnexpectedEOF {
+		if errors.Is(err, io.ErrUnexpectedEOF) {
 			chunk = chunk[:rl]
 		}
 		ch := md5.Sum(chunk)
@@ -70,7 +72,7 @@ func (c *QQClient) highwayUploadStream(ip uint32, port int, updKey []byte, strea
 				Datalength:    int32(rl),
 				Serviceticket: updKey,
 				Md5:           ch[:],
-				FileMd5:       fh[:],
+				FileMd5:       fh,
 			},
 			ReqExtendinfo: EmptyBytes,
 		})
@@ -129,10 +131,10 @@ func (c *QQClient) highwayUploadByBDH(stream io.ReadSeeker, cmdId int32, ticket,
 	for {
 		chunk := make([]byte, chunkSize)
 		rl, err := io.ReadFull(stream, chunk)
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
-		if err == io.ErrUnexpectedEOF {
+		if errors.Is(err, io.ErrUnexpectedEOF) {
 			chunk = chunk[:rl]
 		}
 		ch := md5.Sum(chunk)
@@ -206,7 +208,7 @@ func (c *QQClient) highwayUploadFileMultiThreadingByBDH(path string, cmdId int32
 	}
 	defer file.Close()
 	if stat.Size() < 1024*1024*3 {
-		return c.highwayUploadByBDH(file, cmdId, ticket, ext, encrypt)
+		return c.highwayUploadByBDH(file, cmdId, ticket, ext, false)
 	}
 	type BlockMetaData struct {
 		Id          int
@@ -304,7 +306,7 @@ func (c *QQClient) highwayUploadFileMultiThreadingByBDH(path string, cmdId int32
 					Datalength:    int32(ri),
 					Serviceticket: ticket,
 					Md5:           ch[:],
-					FileMd5:       fh[:],
+					FileMd5:       fh,
 				},
 				ReqExtendinfo: ext,
 			})
@@ -386,6 +388,84 @@ func highwayReadResponse(r *binary.NetworkReader) (*pb.RspDataHighwayHead, []byt
 		return nil, nil, errors.Wrap(err, "failed to unmarshal protobuf message")
 	}
 	return rsp, payload, nil
+}
+
+func (c *QQClient) excitingUploadStream(stream io.ReadSeeker, cmdId int32, ticket, ext []byte) ([]byte, error) {
+	fileMd5, fileLength := utils.ComputeMd5AndLength(stream)
+	_, _ = stream.Seek(0, io.SeekStart)
+	url := fmt.Sprintf("http://%v/cgi-bin/httpconn?htcmd=0x6FF0087&uin=%v", c.srvSsoAddrs[0], c.Uin)
+	var (
+		rspExt    []byte
+		offset    int64 = 0
+		chunkSize       = 524288
+	)
+	for {
+		chunk := make([]byte, chunkSize)
+		rl, err := io.ReadFull(stream, chunk)
+		if err == io.EOF {
+			break
+		}
+		if err == io.ErrUnexpectedEOF {
+			chunk = chunk[:rl]
+		}
+		ch := md5.Sum(chunk)
+		head, _ := proto.Marshal(&pb.ReqDataHighwayHead{
+			MsgBasehead: &pb.DataHighwayHead{
+				Version:   1,
+				Uin:       strconv.FormatInt(c.Uin, 10),
+				Command:   "PicUp.DataUp",
+				Seq:       c.nextGroupDataTransSeq(),
+				Appid:     int32(c.version.AppId),
+				Dataflag:  0,
+				CommandId: cmdId,
+				LocaleId:  0,
+			},
+			MsgSeghead: &pb.SegHead{
+				Filesize:      fileLength,
+				Dataoffset:    offset,
+				Datalength:    int32(rl),
+				Serviceticket: ticket,
+				Md5:           ch[:],
+				FileMd5:       fileMd5,
+			},
+			ReqExtendinfo: ext,
+		})
+		offset += int64(rl)
+		req, _ := http.NewRequest("POST", url, bytes.NewReader(binary.NewWriterF(func(w *binary.Writer) {
+			w.WriteByte(40)
+			w.WriteUInt32(uint32(len(head)))
+			w.WriteUInt32(uint32(len(chunk)))
+			w.Write(head)
+			w.Write(chunk)
+			w.WriteByte(41)
+		})))
+		req.Header.Set("Accept", "*/*")
+		req.Header.Set("Connection", "Keep-Alive")
+		req.Header.Set("User-Agent", "Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.1)")
+		req.Header.Set("Pragma", "no-cache")
+		rsp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return nil, errors.Wrap(err, "request error")
+		}
+		body, _ := ioutil.ReadAll(rsp.Body)
+		r := binary.NewReader(body)
+		r.ReadByte()
+		hl := r.ReadInt32()
+		a2 := r.ReadInt32()
+		h := r.ReadBytes(int(hl))
+		r.ReadBytes(int(a2))
+		rspHead := new(pb.RspDataHighwayHead)
+		if err = proto.Unmarshal(h, rspHead); err != nil {
+			return nil, errors.Wrap(err, "failed to unmarshal protobuf message")
+		}
+		if rspHead.ErrorCode != 0 {
+			return nil, errors.Errorf("upload failed: %d", rspHead.ErrorCode)
+		}
+		if rspHead.RspExtendinfo != nil {
+			rspExt = rspHead.RspExtendinfo
+		}
+	}
+	return rspExt, nil
 }
 
 // 只是为了写的跟上面一样长(bushi，当然也应该是最快的玩法

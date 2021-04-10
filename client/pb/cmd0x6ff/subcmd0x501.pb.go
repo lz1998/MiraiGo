@@ -2,16 +2,17 @@
 // versions:
 // 	protoc-gen-go v1.25.0
 // 	protoc        v3.11.4
-// source: subcmd0x501.proto
+// source: busi.proto
 
 package cmd0x6ff
 
 import (
+	reflect "reflect"
+	sync "sync"
+
 	proto "github.com/golang/protobuf/proto"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
-	reflect "reflect"
-	sync "sync"
 )
 
 const (

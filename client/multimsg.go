@@ -43,7 +43,7 @@ func (c *QQClient) buildMultiApplyUpPacket(data, hash []byte, buType int32, grou
 }
 
 // MultiMsg.ApplyUp
-func decodeMultiApplyUpResponse(_ *QQClient, _ uint16, payload []byte) (interface{}, error) {
+func decodeMultiApplyUpResponse(_ *QQClient, _ *incomingPacketInfo, payload []byte) (interface{}, error) {
 	body := multimsg.MultiRspBody{}
 	if err := proto.Unmarshal(payload, &body); err != nil {
 		return nil, errors.Wrap(err, "failed to unmarshal protobuf message")
@@ -62,7 +62,7 @@ func decodeMultiApplyUpResponse(_ *QQClient, _ uint16, payload []byte) (interfac
 }
 
 // MultiMsg.ApplyDown
-func (c *QQClient) buildMultiApplyDownPacket(resId string) (uint16, []byte) {
+func (c *QQClient) buildMultiApplyDownPacket(resID string) (uint16, []byte) {
 	seq := c.nextSeq()
 	req := &multimsg.MultiReqBody{
 		Subcmd:       2,
@@ -72,7 +72,7 @@ func (c *QQClient) buildMultiApplyDownPacket(resId string) (uint16, []byte) {
 		BuildVer:     "8.2.0.1296",
 		MultimsgApplydownReq: []*multimsg.MultiMsgApplyDownReq{
 			{
-				MsgResid: []byte(resId),
+				MsgResid: []byte(resID),
 				MsgType:  3,
 			},
 		},
@@ -85,7 +85,7 @@ func (c *QQClient) buildMultiApplyDownPacket(resId string) (uint16, []byte) {
 }
 
 // MultiMsg.ApplyDown
-func decodeMultiApplyDownResponse(_ *QQClient, _ uint16, payload []byte) (interface{}, error) {
+func decodeMultiApplyDownResponse(_ *QQClient, _ *incomingPacketInfo, payload []byte) (interface{}, error) {
 	body := multimsg.MultiRspBody{}
 	if err := proto.Unmarshal(payload, &body); err != nil {
 		return nil, errors.Wrap(err, "failed to unmarshal protobuf message")
@@ -119,7 +119,11 @@ func decodeMultiApplyDownResponse(_ *QQClient, _ uint16, payload []byte) (interf
 	if err = proto.Unmarshal(data, &lb); err != nil {
 		return nil, errors.Wrap(err, "failed to unmarshal protobuf message")
 	}
-	uc := binary.GZipUncompress(lb.MsgDownRsp[0].MsgContent)
+	msgContent := lb.MsgDownRsp[0].MsgContent
+	if msgContent == nil {
+		return nil, errors.New("message content is empty")
+	}
+	uc := binary.GZipUncompress(msgContent)
 	mt := msg.PbMultiMsgTransmit{}
 	if err = proto.Unmarshal(uc, &mt); err != nil {
 		return nil, errors.Wrap(err, "failed to unmarshal protobuf message")

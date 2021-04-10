@@ -1,9 +1,10 @@
 package tlv
 
 import (
-	"github.com/Mrs4s/MiraiGo/binary"
 	"math/rand"
 	"time"
+
+	"github.com/Mrs4s/MiraiGo/binary"
 )
 
 func T1(uin uint32, ip []byte) []byte {
@@ -12,7 +13,7 @@ func T1(uin uint32, ip []byte) []byte {
 	}
 	return binary.NewWriterF(func(w *binary.Writer) {
 		w.WriteUInt16(0x01)
-		w.WriteTlv(binary.NewWriterF(func(w *binary.Writer) {
+		w.WriteBytesShort(binary.NewWriterF(func(w *binary.Writer) {
 			w.WriteUInt16(1)
 			w.WriteUInt32(rand.Uint32())
 			w.WriteUInt32(uin)

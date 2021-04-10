@@ -5,6 +5,10 @@ import (
 	goBinary "encoding/binary"
 	"reflect"
 	"strconv"
+	"sync"
+	"unsafe"
+
+	"github.com/modern-go/reflect2"
 )
 
 type JceWriter struct {
@@ -86,7 +90,7 @@ func (w *JceWriter) WriteString(s string, tag int) *JceWriter {
 	by := []byte(s)
 	if len(by) > 255 {
 		w.writeHead(7, tag)
-		_ = goBinary.Write(w.buf, goBinary.BigEndian, len(by))
+		_ = goBinary.Write(w.buf, goBinary.BigEndian, int32(len(by)))
 		w.buf.Write(by)
 		return w
 	}
@@ -96,11 +100,12 @@ func (w *JceWriter) WriteString(s string, tag int) *JceWriter {
 	return w
 }
 
-func (w *JceWriter) WriteBytes(l []byte, tag int) {
+func (w *JceWriter) WriteBytes(l []byte, tag int) *JceWriter {
 	w.writeHead(13, tag)
 	w.writeHead(0, 0)
 	w.WriteInt32(int32(len(l)), 0)
 	w.buf.Write(l)
+	return w
 }
 
 func (w *JceWriter) WriteInt64Slice(l []int64, tag int) {
@@ -199,21 +204,49 @@ func (w *JceWriter) WriteObject(i interface{}, tag int) {
 	}
 }
 
+type decoder []struct {
+	ty     reflect2.Type
+	offset uintptr
+	id     int
+}
+
+var decoderCache = sync.Map{}
+
+// WriteJceStructRaw 写入 Jce 结构体
 func (w *JceWriter) WriteJceStructRaw(s IJceStruct) {
 	var (
-		t = reflect.TypeOf(s).Elem()
-		v = reflect.ValueOf(s).Elem()
+		ty2    = reflect2.TypeOf(s)
+		jceDec decoder
 	)
-	for i := 0; i < t.NumField(); i++ {
-		strId := t.Field(i).Tag.Get("jceId")
-		if strId == "" {
-			continue
+	dec, ok := decoderCache.Load(ty2)
+	if ok { // 从缓存中加载
+		jceDec = dec.(decoder)
+	} else { // 初次反射
+		jceDec = decoder{}
+		t := reflect2.TypeOf(s).(reflect2.PtrType).Elem().(reflect2.StructType)
+		for i := 0; i < t.NumField(); i++ {
+			field := t.Field(i)
+			strId := field.Tag().Get("jceId")
+			if strId == "" {
+				continue
+			}
+			id, err := strconv.Atoi(strId)
+			if err != nil {
+				continue
+			}
+			jceDec = append(jceDec, struct {
+				ty     reflect2.Type
+				offset uintptr
+				id     int
+			}{ty: field.Type(), offset: field.Offset(), id: id})
 		}
-		id, err := strconv.Atoi(strId)
-		if err != nil {
-			continue
+		decoderCache.Store(ty2, jceDec) // 存入缓存
+	}
+	for _, dec := range jceDec {
+		var obj = dec.ty.UnsafeIndirect(unsafe.Pointer(uintptr(reflect2.PtrOf(s)) + dec.offset)) // MAGIC!
+		if obj != nil {
+			w.WriteObject(obj, dec.id)
 		}
-		w.WriteObject(v.Field(i).Interface(), id)
 	}
 }
 

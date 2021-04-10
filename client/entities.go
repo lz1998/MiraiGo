@@ -15,7 +15,11 @@ var (
 type (
 	LoginError int
 
+	QRCodeLoginState int
+
 	MemberPermission int
+
+	UserOnlineStatus int
 
 	ClientProtocol int
 
@@ -37,12 +41,27 @@ type (
 		ErrorMessage string
 	}
 
+	QRCodeLoginResponse struct {
+		State QRCodeLoginState
+
+		ImageData []byte
+		Sig       []byte
+
+		LoginInfo *QRCodeLoginInfo
+	}
+
+	QRCodeLoginInfo struct {
+		tmpPwd      []byte
+		tmpNoPicSig []byte
+		tgtQR       []byte
+	}
+
 	FriendInfo struct {
 		Uin      int64
 		Nickname string
 		Remark   string
 		FaceId   int16
-		//msgSeqList *utils.Cache
+		// msgSeqList *utils.Cache
 	}
 
 	SummaryCardInfo struct {
@@ -55,11 +74,23 @@ type (
 		Sign      string
 		Mobile    string
 		LoginDays int64
+		Qid       string
+	}
+
+	OtherClientInfo struct {
+		AppId      int64
+		DeviceName string
+		DeviceKind string
 	}
 
 	FriendListResponse struct {
 		TotalCount int32
 		List       []*FriendInfo
+	}
+
+	OtherClientStatusChangedEvent struct {
+		Client *OtherClientInfo
+		Online bool
 	}
 
 	GroupMuteEvent struct {
@@ -83,6 +114,11 @@ type (
 		Time      int64
 	}
 
+	TempMessageEvent struct {
+		Message *message.TempMessage
+		Session *TempSessionInfo
+	}
+
 	GroupLeaveEvent struct {
 		Group    *GroupInfo
 		Operator *GroupMemberInfo
@@ -91,6 +127,13 @@ type (
 	MemberJoinGroupEvent struct {
 		Group  *GroupInfo
 		Member *GroupMemberInfo
+	}
+
+	GroupNameUpdatedEvent struct {
+		Group       *GroupInfo
+		OldName     string
+		NewName     string
+		OperatorUin int64
 	}
 
 	MemberCardUpdatedEvent struct {
@@ -148,6 +191,32 @@ type (
 		FileSize    int64
 		Sender      int64
 		DownloadUrl string
+	}
+
+	// GroupDigest 群精华消息
+	GroupDigest struct {
+		GroupCode         string `json:"group_code"`
+		MessageID         uint32 `json:"msg_seq"`
+		InternalMessageID uint32 `json:"msg_random"`
+		SenderUin         string `json:"sender_uin"`
+		SenderNick        string `json:"sender_nick"`
+		SenderTime        int64  `json:"sender_time"`
+		AddDigestUin      string `json:"add_digest_uin"`
+		AddDigestNick     string `json:"add_digest_nick"`
+		AddDigestTime     int64  `json:"add_digest_time"`
+	}
+
+	// GroupDigestEvent 群精华消息 不知道tx为什么搞两种名字
+	GroupDigestEvent struct {
+		GroupCode         int64
+		MessageID         int32
+		InternalMessageID int32
+		OperationType     int32 // 1 -> 设置精华消息, 2 -> 移除精华消息
+		OperateTime       uint32
+		SenderUin         int64
+		OperatorUin       int64
+		SenderNick        string
+		OperatorNick      string
 	}
 
 	OcrResponse struct {
@@ -226,9 +295,41 @@ const (
 	SliderNeededError      LoginError = 8
 	UnknownLoginError      LoginError = -1
 
-	Owner MemberPermission = iota
-	Administrator
-	Member
+	QRCodeImageFetch        QRCodeLoginState = 1
+	QRCodeWaitingForScan    QRCodeLoginState = 2
+	QRCodeWaitingForConfirm QRCodeLoginState = 3
+	QRCodeTimeout           QRCodeLoginState = 4
+	QRCodeConfirmed         QRCodeLoginState = 5
+	QRCodeCanceled          QRCodeLoginState = 6
+
+	StatusOnline        UserOnlineStatus = 11   // 在线
+	StatusOffline       UserOnlineStatus = 21   // 离线
+	StatusAway          UserOnlineStatus = 31   // 离开
+	StatusInvisible     UserOnlineStatus = 41   // 隐身
+	StatusBusy          UserOnlineStatus = 50   // 忙
+	StatusBattery       UserOnlineStatus = 1000 // 当前电量
+	StatusListening     UserOnlineStatus = 1028 // 听歌中
+	StatusConstellation UserOnlineStatus = 1040 // 星座运势
+	StatusWeather       UserOnlineStatus = 1030 // 今日天气
+	StatusMeetSpring    UserOnlineStatus = 1069 // 遇见春天
+	StatusTimi          UserOnlineStatus = 1027 // Timi中
+	StatusEatChicken    UserOnlineStatus = 1064 // 吃鸡中
+	StatusLoving        UserOnlineStatus = 1051 // 恋爱中
+	StatusWangWang      UserOnlineStatus = 1053 // 汪汪汪
+	StatusCookedRice    UserOnlineStatus = 1019 // 干饭中
+	StatusStudy         UserOnlineStatus = 1018 // 学习中
+	StatusStayUp        UserOnlineStatus = 1032 // 熬夜中
+	StatusPlayBall      UserOnlineStatus = 1050 // 打球中
+	StatusSignal        UserOnlineStatus = 1011 // 信号弱
+	StatusStudyOnline   UserOnlineStatus = 1024 // 在线学习
+	StatusGaming        UserOnlineStatus = 1017 // 游戏中
+	StatusVacationing   UserOnlineStatus = 1022 // 度假中
+	StatusWatchingTV    UserOnlineStatus = 1021 // 追剧中
+	StatusFitness       UserOnlineStatus = 1020 // 健身中
+
+	Owner         MemberPermission = 1
+	Administrator MemberPermission = 2
+	Member        MemberPermission = 3
 
 	AndroidPhone ClientProtocol = 1
 	IPad         ClientProtocol = 2

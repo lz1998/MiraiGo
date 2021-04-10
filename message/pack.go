@@ -2,9 +2,10 @@ package message
 
 import (
 	"encoding/hex"
+
 	"github.com/Mrs4s/MiraiGo/binary"
 	"github.com/Mrs4s/MiraiGo/client/pb/msg"
-	"github.com/golang/protobuf/proto"
+	"google.golang.org/protobuf/proto"
 )
 
 var imgOld = []byte{0x15, 0x36, 0x20, 0x39, 0x32, 0x6B, 0x41, 0x31, 0x00, 0x38, 0x37, 0x32, 0x66, 0x30, 0x36, 0x36, 0x30, 0x33, 0x61, 0x65, 0x31, 0x30, 0x33, 0x62, 0x37, 0x20, 0x20, 0x20, 0x20, 0x20,
@@ -22,7 +23,7 @@ func (e *TextElement) Pack() (r []*msg.Elem) {
 
 func (e *FaceElement) Pack() (r []*msg.Elem) {
 	r = []*msg.Elem{}
-	if e.NewSysFace {
+	if e.Index >= 260 {
 		elem := &msg.MsgElemInfoServtype33{
 			Index:  proto.Uint32(uint32(e.Index)),
 			Text:   []byte("/" + e.Name),
@@ -100,7 +101,7 @@ func (e *GroupImageElement) Pack() (r []*msg.Elem) {
 			FilePath:  &e.ImageId,
 			ImageType: &e.ImageType,
 			Size:      &e.Size,
-			Md5:       e.Md5[:],
+			Md5:       e.Md5,
 			Flag:      make([]byte, 4),
 			//OldData:  imgOld,
 		},
@@ -127,7 +128,7 @@ func (e *FriendImageElement) Pack() (r []*msg.Elem) {
 func (e *ServiceElement) Pack() (r []*msg.Elem) {
 	r = []*msg.Elem{}
 	// id =35 已移至 ForwardElement
-	if e.Id == 33 {
+	if e.Id == 1 {
 		r = append(r, &msg.Elem{
 			Text: &msg.Text{Str: &e.ResId},
 		})
@@ -215,7 +216,7 @@ func (e *GroupFlashPicElement) Pack() (r []*msg.Elem) {
 			FileId:   proto.Int32(int32(e.FileId)),
 			FilePath: &e.ImageId,
 			Size:     &e.Size,
-			Md5:      e.Md5[:],
+			Md5:      e.Md5,
 			Flag:     make([]byte, 4),
 		},
 	}
@@ -249,7 +250,7 @@ func (e *GroupShowPicElement) Pack() (r []*msg.Elem) {
 			FileId:    proto.Int32(int32(e.FileId)),
 			FilePath:  &e.ImageId,
 			Size:      &e.Size,
-			Md5:       e.Md5[:],
+			Md5:       e.Md5,
 			Flag:      []byte{0x11, 0x00, 0x00, 0x00},
 			//OldData:  imgOld,
 			PbReserve: reserve,

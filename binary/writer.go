@@ -1,30 +1,53 @@
 package binary
 
 import (
-	"bytes"
 	"encoding/binary"
+	"encoding/hex"
+	"sync"
 )
 
 type Writer struct {
-	buf *bytes.Buffer
+	b []byte
+}
+
+var bufferPool = sync.Pool{
+	New: func() interface{} {
+		return new(Writer)
+	},
 }
 
 func NewWriter() *Writer {
-	return &Writer{buf: new(bytes.Buffer)}
+	return bufferPool.Get().(*Writer)
+}
+
+func PutBuffer(w *Writer) {
+	// See https://golang.org/issue/23199
+	const maxSize = 1 << 16
+	if cap(w.b) < maxSize { // 对于大Buffer直接丢弃
+		w.b = w.b[:0]
+		bufferPool.Put(w)
+	}
 }
 
 func NewWriterF(f func(writer *Writer)) []byte {
 	w := NewWriter()
 	f(w)
-	return w.Bytes()
+	b := append([]byte(nil), w.Bytes()...)
+	PutBuffer(w)
+	return b
 }
 
 func (w *Writer) Write(b []byte) {
-	w.buf.Write(b)
+	w.b = append(w.b, b...)
+}
+
+func (w *Writer) WriteHex(h string) {
+	b, _ := hex.DecodeString(h)
+	w.Write(b)
 }
 
 func (w *Writer) WriteByte(b byte) {
-	w.buf.WriteByte(b)
+	w.b = append(w.b, b)
 }
 
 func (w *Writer) WriteUInt16(v uint16) {
@@ -52,7 +75,7 @@ func (w *Writer) WriteString(v string) {
 }
 
 func (w *Writer) WriteStringShort(v string) {
-	w.WriteTlv([]byte(v))
+	w.WriteBytesShort([]byte(v))
 }
 
 func (w *Writer) WriteBool(b bool) {
@@ -70,9 +93,7 @@ func (w *Writer) EncryptAndWrite(key []byte, data []byte) {
 }
 
 func (w *Writer) WriteIntLvPacket(offset int, f func(writer *Writer)) {
-	t := NewWriter()
-	f(t)
-	data := t.Bytes()
+	data := NewWriterF(f)
 	w.WriteUInt32(uint32(len(data) + offset))
 	w.Write(data)
 }
@@ -94,19 +115,19 @@ func (w *Writer) WriteUniPacket(commandName string, sessionId, extraData, body [
 	})
 }
 
-func (w *Writer) WriteTlv(data []byte) {
+func (w *Writer) WriteBytesShort(data []byte) {
 	w.WriteUInt16(uint16(len(data)))
 	w.Write(data)
 }
 
 func (w *Writer) WriteTlvLimitedSize(data []byte, limit int) {
 	if len(data) <= limit {
-		w.WriteTlv(data)
+		w.WriteBytesShort(data)
 		return
 	}
-	w.WriteTlv(data[:limit])
+	w.WriteBytesShort(data[:limit])
 }
 
 func (w *Writer) Bytes() []byte {
-	return w.buf.Bytes()
+	return w.b
 }
