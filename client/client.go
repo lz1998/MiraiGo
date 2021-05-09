@@ -15,6 +15,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	jsoniter "github.com/json-iterator/go"
+	"github.com/pkg/errors"
+
 	"github.com/Mrs4s/MiraiGo/binary"
 	"github.com/Mrs4s/MiraiGo/binary/jce"
 	"github.com/Mrs4s/MiraiGo/client/pb/msg"
@@ -22,8 +25,6 @@ import (
 	"github.com/Mrs4s/MiraiGo/protocol/crypto"
 	"github.com/Mrs4s/MiraiGo/protocol/packets"
 	"github.com/Mrs4s/MiraiGo/utils"
-	jsoniter "github.com/json-iterator/go"
-	"github.com/pkg/errors"
 )
 
 var json = jsoniter.ConfigFastest
@@ -42,6 +43,7 @@ type QQClient struct {
 	GroupList     []*GroupInfo
 	OnlineClients []*OtherClientInfo
 	Online        bool
+	QiDian        *QiDianAccountInfo
 	// NetLooping    bool
 
 	SequenceId              int32
@@ -74,7 +76,7 @@ type QQClient struct {
 	randSeed         []byte // t403
 	timeDiff         int64
 	sigInfo          *loginSigInfo
-	highwaySession   *highwaySessionInfo
+	bigDataSession   *bigDataSessionInfo
 	srvSsoAddrs      []string
 	otherSrvAddrs    []string
 	fileStorageInfo  *jce.FileStoragePushFSSvcList
@@ -121,6 +123,15 @@ type loginSigInfo struct {
 	pt4TokenMap map[string][]byte
 }
 
+type QiDianAccountInfo struct {
+	MasterUin  int64
+	ExtName    string
+	CreateTime int64
+
+	bigDataReqAddrs   []string
+	bigDataReqSession *bigDataSessionInfo
+}
+
 type handlerInfo struct {
 	fun    func(i interface{}, err error)
 	params requestParams
@@ -140,6 +151,7 @@ var decoders = map[string]func(*QQClient, *incomingPacketInfo, []byte) (interfac
 	"MessageSvc.PushForceOffline":                  decodeForceOfflinePacket,
 	"PbMessageSvc.PbMsgWithDraw":                   decodeMsgWithDrawResponse,
 	"friendlist.getFriendGroupList":                decodeFriendGroupListResponse,
+	"friendlist.delFriend":                         decodeFriendDeleteResponse,
 	"friendlist.GetTroopListReqV2":                 decodeGroupListResponse,
 	"friendlist.GetTroopMemberListReq":             decodeGroupMemberListResponse,
 	"group_member_card.get_group_member_card_info": decodeGroupMemberInfoResponse,
@@ -236,7 +248,7 @@ func NewClientMd5(uin int64, passwordMd5 [16]byte) *QQClient {
 	if len(cli.servers) > 3 {
 		cli.servers = cli.servers[0 : len(cli.servers)/2] // 保留ping值中位数以上的server
 	}
-	cli.TCP.PlanedDisconnect(cli.planedDisconnect)
+	cli.TCP.PlannedDisconnect(cli.plannedDisconnect)
 	cli.TCP.UnexpectedDisconnect(cli.unexpectedDisconnect)
 	rand.Read(cli.RandomKey)
 	go cli.netLoop()
@@ -408,6 +420,10 @@ func (c *QQClient) init(tokenLogin bool) error {
 		go c.doHeartbeat()
 	}
 	_ = c.RefreshStatus()
+	if c.version.Protocol == QiDian {
+		_, _ = c.sendAndWait(c.buildLoginExtraPacket())     // 小登录
+		_, _ = c.sendAndWait(c.buildConnKeyRequestPacket()) // big data key 如果等待 config push 的话时间来不及
+	}
 	seq, pkt := c.buildGetMessageRequestPacket(msg.SyncFlag_START, time.Now().Unix())
 	_, _ = c.sendAndWait(seq, pkt, requestParams{"used_reg_proxy": true, "init": true})
 	c.stat.once.Do(func() {
@@ -534,9 +550,18 @@ func (c *QQClient) ReloadFriendList() error {
 	return nil
 }
 
-// GetFriendList request friend list
+// GetFriendList
+// 当使用普通QQ时: 请求好友列表
+// 当使用企点QQ时: 请求外部联系人列表
 func (c *QQClient) GetFriendList() (*FriendListResponse, error) {
-	var curFriendCount = 0
+	if c.version.Protocol == QiDian {
+		rsp, err := c.getQiDianAddressDetailList()
+		if err != nil {
+			return nil, err
+		}
+		return &FriendListResponse{TotalCount: int32(len(rsp)), List: rsp}, nil
+	}
+	curFriendCount := 0
 	r := &FriendListResponse{}
 	for {
 		rsp, err := c.sendAndWait(c.buildFriendGroupListRequestPacket(int16(curFriendCount), 150, 0, 0))
@@ -712,6 +737,14 @@ func (c *QQClient) FindFriend(uin int64) *FriendInfo {
 		}
 	}
 	return nil
+}
+
+func (c *QQClient) DeleteFriend(uin int64) error {
+	if c.FindFriend(uin) == nil {
+		return errors.New("friend not found")
+	}
+	_, err := c.sendAndWait(c.buildFriendDeletePacket(uin))
+	return errors.Wrap(err, "delete friend error")
 }
 
 func (c *QQClient) FindGroupByUin(uin int64) *GroupInfo {
@@ -968,6 +1001,7 @@ func (c *QQClient) connect() error {
 
 func (c *QQClient) quickReconnect() {
 	c.Disconnect()
+	time.Sleep(time.Millisecond * 200)
 	if err := c.connect(); err != nil {
 		c.Error("connect server error: %v", err)
 		c.dispatchDisconnectEvent(&ClientDisconnectedEvent{Message: "quick reconnect failed"})
@@ -982,11 +1016,12 @@ func (c *QQClient) quickReconnect() {
 }
 
 func (c *QQClient) Disconnect() {
+	c.Online = false
 	c.TCP.Close()
 }
 
-func (c *QQClient) planedDisconnect(_ *utils.TCPListener) {
-	c.Debug("planed disconnect.")
+func (c *QQClient) plannedDisconnect(_ *utils.TCPListener) {
+	c.Debug("planned disconnect.")
 	c.stat.DisconnectTimes++
 	c.Online = false
 }
@@ -994,6 +1029,7 @@ func (c *QQClient) planedDisconnect(_ *utils.TCPListener) {
 func (c *QQClient) unexpectedDisconnect(_ *utils.TCPListener, e error) {
 	c.Error("unexpected disconnect: %v", e)
 	c.stat.DisconnectTimes++
+	c.Online = false
 	if err := c.connect(); err != nil {
 		c.Error("connect server error: %v", err)
 		c.dispatchDisconnectEvent(&ClientDisconnectedEvent{Message: "connection dropped by server."})
@@ -1021,12 +1057,13 @@ func (c *QQClient) netLoop() {
 		if err != nil {
 			c.Error("parse incoming packet error: %v", err)
 			if errors.Is(err, packets.ErrSessionExpired) || errors.Is(err, packets.ErrPacketDropped) {
-				c.quickReconnect()
+				c.Disconnect()
+				go c.dispatchDisconnectEvent(&ClientDisconnectedEvent{Message: "session expired"})
 				continue
 			}
 			errCount++
 			if errCount > 2 {
-				c.quickReconnect()
+				go c.quickReconnect()
 				continue
 			}
 			continue
@@ -1096,7 +1133,7 @@ func (c *QQClient) doHeartbeat() {
 	for c.Online {
 		time.Sleep(time.Second * 30)
 		seq := c.nextSeq()
-		sso := packets.BuildSsoPacket(seq, c.version.AppId, "Heartbeat.Alive", SystemDeviceInfo.IMEI, []byte{}, c.OutGoingPacketSessionId, []byte{}, c.ksid)
+		sso := packets.BuildSsoPacket(seq, c.version.AppId, c.version.SubAppId, "Heartbeat.Alive", SystemDeviceInfo.IMEI, []byte{}, c.OutGoingPacketSessionId, []byte{}, c.ksid)
 		packet := packets.BuildLoginPacket(c.Uin, 0, []byte{}, sso, []byte{})
 		_, err := c.sendAndWait(seq, packet)
 		if errors.Is(err, utils.ErrConnectionClosed) {

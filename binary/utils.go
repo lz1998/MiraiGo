@@ -12,6 +12,23 @@ import (
 	"github.com/Mrs4s/MiraiGo/utils"
 )
 
+type GzipWriter struct {
+	w   *gzip.Writer
+	buf *bytes.Buffer
+}
+
+func (w *GzipWriter) Write(p []byte) (int, error) {
+	return w.w.Write(p)
+}
+
+func (w *GzipWriter) Close() error {
+	return w.w.Close()
+}
+
+func (w *GzipWriter) Bytes() []byte {
+	return w.buf.Bytes()
+}
+
 func ZlibUncompress(src []byte) []byte {
 	b := bytes.NewReader(src)
 	var out bytes.Buffer
@@ -22,19 +39,21 @@ func ZlibUncompress(src []byte) []byte {
 }
 
 func ZlibCompress(data []byte) []byte {
-	buf := new(bytes.Buffer)
-	w := zlib.NewWriter(buf)
-	_, _ = w.Write(data)
-	w.Close()
-	return buf.Bytes()
+	zw := acquireZlibWriter()
+	_, _ = zw.w.Write(data)
+	_ = zw.w.Close()
+	ret := append([]byte(nil), zw.buf.Bytes()...)
+	releaseZlibWriter(zw)
+	return ret
 }
 
 func GZipCompress(data []byte) []byte {
-	buf := new(bytes.Buffer)
-	w := gzip.NewWriter(buf)
-	_, _ = w.Write(data)
-	_ = w.Close()
-	return buf.Bytes()
+	gw := AcquireGzipWriter()
+	_, _ = gw.Write(data)
+	_ = gw.Close()
+	ret := append([]byte(nil), gw.buf.Bytes()...)
+	ReleaseGzipWriter(gw)
+	return ret
 }
 
 func GZipUncompress(src []byte) []byte {
@@ -53,7 +72,6 @@ func CalculateImageResourceId(md5 []byte) string {
 	id = id[:37]
 	id = append(id, "}.png"...)
 	return utils.B2S(bytes.ToUpper(id))
-
 }
 
 func GenUUID(uuid []byte) []byte {

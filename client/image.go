@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"image"
+	_ "image/gif"
 	"io"
 	"math/rand"
 	"os"
@@ -13,13 +14,14 @@ import (
 	"github.com/Mrs4s/MiraiGo/client/pb/highway"
 	"github.com/Mrs4s/MiraiGo/client/pb/oidb"
 
+	"github.com/pkg/errors"
+	"google.golang.org/protobuf/proto"
+
 	"github.com/Mrs4s/MiraiGo/binary"
 	"github.com/Mrs4s/MiraiGo/client/pb"
 	"github.com/Mrs4s/MiraiGo/message"
 	"github.com/Mrs4s/MiraiGo/protocol/packets"
 	"github.com/Mrs4s/MiraiGo/utils"
-	"github.com/pkg/errors"
-	"google.golang.org/protobuf/proto"
 )
 
 func init() {
@@ -48,10 +50,10 @@ func (c *QQClient) UploadGroupImage(groupCode int64, img io.ReadSeeker) (*messag
 			c.srvSsoAddrs = append(c.srvSsoAddrs, fmt.Sprintf("%v:%v", binary.UInt32ToIPV4Address(uint32(addr)), rsp.UploadPort[i]))
 		}
 	}
-	if _, err = c.highwayUploadByBDH(img, 2, rsp.UploadKey, EmptyBytes, false); err == nil {
+	if _, err = c.highwayUploadByBDH(img, length, 2, rsp.UploadKey, fh, EmptyBytes, false); err == nil {
 		goto ok
 	}
-	return nil, errors.New("upload failed")
+	return nil, errors.Wrap(err, "upload failed")
 ok:
 	_, _ = img.Seek(0, io.SeekStart)
 	i, _, _ := image.DecodeConfig(img)
@@ -66,7 +68,7 @@ ok:
 }
 
 func (c *QQClient) UploadGroupImageByFile(groupCode int64, path string) (*message.GroupImageElement, error) {
-	img, err := os.OpenFile(path, os.O_RDONLY, 0666)
+	img, err := os.OpenFile(path, os.O_RDONLY, 0o666)
 	if err != nil {
 		return nil, err
 	}
@@ -92,7 +94,7 @@ func (c *QQClient) UploadGroupImageByFile(groupCode int64, path string) (*messag
 	if _, err = c.highwayUploadFileMultiThreadingByBDH(path, 2, 4, rsp.UploadKey, EmptyBytes, false); err == nil {
 		goto ok
 	}
-	return nil, errors.New("upload failed")
+	return nil, errors.Wrap(err, "upload failed")
 ok:
 	_, _ = img.Seek(0, io.SeekStart)
 	i, _, _ := image.DecodeConfig(img)
@@ -137,10 +139,11 @@ func (c *QQClient) ImageOcr(img interface{}) (*OcrResponse, error) {
 	switch e := img.(type) {
 	case *message.GroupImageElement:
 		url = e.Url
-		if b, err := utils.HttpGetBytes(e.Url, ""); err == nil {
-			if url, err = c.uploadOcrImage(bytes.NewReader(b)); err != nil {
+		if b, err := utils.HTTPGetReadCloser(e.Url, ""); err == nil {
+			if url, err = c.uploadOcrImage(b, int64(e.Size), e.Md5); err != nil {
 				url = e.Url
 			}
+			_ = b.Close()
 		}
 		rsp, err := c.sendAndWait(c.buildImageOcrRequestPacket(url, strings.ToUpper(hex.EncodeToString(e.Md5)), e.Size, e.Width, e.Height))
 		if err != nil {
@@ -149,10 +152,11 @@ func (c *QQClient) ImageOcr(img interface{}) (*OcrResponse, error) {
 		return rsp.(*OcrResponse), nil
 	case *message.ImageElement:
 		url = e.Url
-		if b, err := utils.HttpGetBytes(e.Url, ""); err == nil {
-			if url, err = c.uploadOcrImage(bytes.NewReader(b)); err != nil {
+		if b, err := utils.HTTPGetReadCloser(e.Url, ""); err == nil {
+			if url, err = c.uploadOcrImage(b, int64(e.Size), e.Md5); err != nil {
 				url = e.Url
 			}
+			_ = b.Close()
 		}
 		rsp, err := c.sendAndWait(c.buildImageOcrRequestPacket(url, strings.ToUpper(hex.EncodeToString(e.Md5)), e.Size, e.Width, e.Height))
 		if err != nil {
@@ -191,13 +195,13 @@ func (c *QQClient) QueryFriendImage(target int64, hash []byte, size int32) (*mes
 		return &message.FriendImageElement{
 			ImageId: rsp.ResourceId,
 			Md5:     hash,
-			Url:     "http://c2cpicdw.qpic.cn/offpic_new/0/" + rsp.ResourceId + "/0?term=2",
+			Url:     "https://c2cpicdw.qpic.cn/offpic_new/0/" + rsp.ResourceId + "/0?term=2",
 		}, errors.WithStack(ErrNotExists)
 	}
 	return &message.FriendImageElement{
 		ImageId: rsp.ResourceId,
 		Md5:     hash,
-		Url:     "http://c2cpicdw.qpic.cn/offpic_new/0/" + rsp.ResourceId + "/0?term=2",
+		Url:     "https://c2cpicdw.qpic.cn/offpic_new/0/" + rsp.ResourceId + "/0?term=2",
 	}, nil
 }
 
@@ -232,14 +236,14 @@ func (c *QQClient) buildGroupImageStorePacket(groupCode int64, md5 []byte, size 
 	return seq, packet
 }
 
-func (c *QQClient) uploadOcrImage(img io.ReadSeeker) (string, error) {
+func (c *QQClient) uploadOcrImage(img io.Reader, length int64, sum []byte) (string, error) {
 	r := make([]byte, 16)
 	rand.Read(r)
 	ext, _ := proto.Marshal(&highway.CommFileExtReq{
 		ActionType: proto.Uint32(0),
 		Uuid:       binary.GenUUID(r),
 	})
-	rsp, err := c.highwayUploadByBDH(img, 76, c.highwaySession.SigSession, ext, false)
+	rsp, err := c.highwayUploadByBDH(img, length, 76, c.bigDataSession.SigSession, sum, ext, false)
 	if err != nil {
 		return "", errors.Wrap(err, "upload ocr image error")
 	}
@@ -316,9 +320,9 @@ func decodeImageOcrResponse(_ *QQClient, _ *incomingPacketInfo, payload []byte) 
 	if rsp.RetCode != 0 {
 		return nil, errors.Errorf("server error, code: %v msg: %v", rsp.RetCode, rsp.ErrMsg)
 	}
-	var texts = make([]*TextDetection, 0, len(rsp.OcrRspBody.TextDetections))
+	texts := make([]*TextDetection, 0, len(rsp.OcrRspBody.TextDetections))
 	for _, text := range rsp.OcrRspBody.TextDetections {
-		var points = make([]*Coordinate, 0, len(text.Polygon.Coordinates))
+		points := make([]*Coordinate, 0, len(text.Polygon.Coordinates))
 		for _, c := range text.Polygon.Coordinates {
 			points = append(points, &Coordinate{
 				X: c.X,

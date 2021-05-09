@@ -3,16 +3,19 @@ package packets
 import (
 	"strconv"
 
+	"github.com/pkg/errors"
+
 	"github.com/Mrs4s/MiraiGo/binary"
 	"github.com/Mrs4s/MiraiGo/protocol/crypto"
-	"github.com/pkg/errors"
 )
 
-var ErrUnknownFlag = errors.New("unknown flag")
-var ErrInvalidPayload = errors.New("invalid payload")
-var ErrDecryptFailed = errors.New("decrypt failed")
-var ErrSessionExpired = errors.New("session expired")
-var ErrPacketDropped = errors.New("packet dropped")
+var (
+	ErrUnknownFlag    = errors.New("unknown flag")
+	ErrInvalidPayload = errors.New("invalid payload")
+	ErrDecryptFailed  = errors.New("decrypt failed")
+	ErrSessionExpired = errors.New("session expired")
+	ErrPacketDropped  = errors.New("packet dropped")
+)
 
 type ISendingPacket interface {
 	CommandId() uint16
@@ -69,12 +72,12 @@ func BuildCode2DRequestPacket(seq uint32, j uint64, cmd uint16, bodyFunc func(wr
 	})
 }
 
-func BuildSsoPacket(seq uint16, appID uint32, commandName, imei string, extData, outPacketSessionId, body, ksid []byte) []byte {
+func BuildSsoPacket(seq uint16, appID, subAppID uint32, commandName, imei string, extData, outPacketSessionId, body, ksid []byte) []byte {
 	return binary.NewWriterF(func(p *binary.Writer) {
 		p.WriteIntLvPacket(4, func(writer *binary.Writer) {
 			writer.WriteUInt32(uint32(seq))
 			writer.WriteUInt32(appID)
-			writer.WriteUInt32(appID)
+			writer.WriteUInt32(subAppID)
 			writer.Write([]byte{0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00})
 			if len(extData) == 0 || len(extData) == 4 {
 				writer.WriteUInt32(0x04)
@@ -109,7 +112,7 @@ func ParseIncomingPacket(payload, d2key []byte) (*IncomingPacket, error) {
 	flag1 := reader.ReadInt32()
 	flag2 := reader.ReadByte()
 	if reader.ReadByte() != 0 { // flag3
-		//return nil, errors.WithStack(ErrUnknownFlag)
+		// return nil, errors.WithStack(ErrUnknownFlag)
 	}
 	reader.ReadString() // uin string
 	decrypted := func() (data []byte) {

@@ -12,11 +12,12 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/pkg/errors"
+
 	"github.com/Mrs4s/MiraiGo/client/pb/exciting"
 	"github.com/Mrs4s/MiraiGo/client/pb/oidb"
 	"github.com/Mrs4s/MiraiGo/protocol/packets"
 	"github.com/Mrs4s/MiraiGo/utils"
-	"github.com/pkg/errors"
 )
 
 type (
@@ -173,7 +174,7 @@ func (fs *GroupFileSystem) UploadFile(p, name, folderId string) error {
 		defer fileSingleFlight.Delete(p)
 	}
 
-	file, err := os.OpenFile(p, os.O_RDONLY, 0666)
+	file, err := os.OpenFile(p, os.O_RDONLY, 0o666)
 	if err != nil {
 		return errors.Wrap(err, "open file error")
 	}
@@ -233,7 +234,7 @@ func (fs *GroupFileSystem) UploadFile(p, name, folderId string) error {
 		},
 		Unknown3: proto.Int32(0),
 	})
-	if _, err = fs.client.excitingUploadStream(file, 71, fs.client.highwaySession.SigSession, ext); err != nil {
+	if _, err = fs.client.excitingUploadStream(file, 71, fs.client.bigDataSession.SigSession, ext); err != nil {
 		return errors.Wrap(err, "upload failed")
 	}
 	_, pkt := fs.client.buildGroupFileFeedsRequest(fs.GroupCode, rsp.FileId, rsp.BusId, rand.Int31())

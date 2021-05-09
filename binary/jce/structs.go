@@ -1,7 +1,7 @@
 package jce
 
 type IJceStruct interface {
-	//ToBytes() []byte
+	// ToBytes() []byte
 	ReadFrom(*JceReader)
 }
 
@@ -42,8 +42,8 @@ type (
 		BigDataChannel        *BigDataChannel         `jceId:"5"`
 		VipEmotionList        []FileStorageServerInfo `jceId:"6"`
 		C2CPicDownList        []FileStorageServerInfo `jceId:"7"`
-		//FmtIPInfo             *FmtIPInfo `jceId:"8"`
-		//DomainIPChannel       *DomainIPChannel `jceId:"9"`
+		// FmtIPInfo             *FmtIPInfo `jceId:"8"`
+		// DomainIPChannel       *DomainIPChannel `jceId:"9"`
 		PttList []byte `jceId:"10"`
 	}
 
@@ -188,6 +188,18 @@ type (
 		RoamFlag            int64        `jceId:"6"`
 		OnlineInfos         []OnlineInfo `jceId:"7"`
 		PCClientType        int32        `jceId:"8"`
+	}
+
+	RequestPushNotify struct {
+		Uin          int64  `jceId:"0"`
+		Type         byte   `jceId:"1"`
+		Service      string `jceId:"2"`
+		Cmd          string `jceId:"3"`
+		NotifyCookie []byte `jceId:"4"`
+		MsgType      int32  `jceId:"5"`
+		UserActive   int32  `jceId:"6"`
+		GeneralFlag  int32  `jceId:"7"`
+		BindedUin    int64  `jceId:"8"`
 	}
 
 	OnlineInfo struct {
@@ -496,8 +508,8 @@ type (
 		IsFriend           byte  `jceId:"3"`
 		GroupCode          int64 `jceId:"4"`
 		GroupUin           int64 `jceId:"5"`
-		//Seed               []byte`jceId:"6"`
-		//SearchName         string`jceId:"7"`
+		// Seed               []byte`jceId:"6"`
+		// SearchName         string`jceId:"7"`
 		GetControl       int64    `jceId:"8"`
 		AddFriendSource  int32    `jceId:"9"`
 		SecureSig        []byte   `jceId:"10"`
@@ -516,6 +528,14 @@ type (
 		CountryCode string   `jceId:"1"`
 		Version     int32    `jceId:"2"`
 		ReqServices [][]byte `jceId:"3"` // busi
+	}
+
+	DelFriendReq struct {
+		IJceStruct
+		Uin     int64 `jceId:"0"`
+		DelUin  int64 `jceId:"1"`
+		DelType byte  `jceId:"2"`
+		Version int32 `jceId:"3"`
 	}
 )
 
@@ -761,6 +781,18 @@ func (pkt *SvcRespParam) ReadFrom(r *JceReader) {
 	pkt.PCClientType = r.ReadInt32(8)
 }
 
+func (pkt *RequestPushNotify) ReadFrom(r *JceReader) {
+	pkt.Uin = r.ReadInt64(0)
+	pkt.Type = r.ReadByte(1)
+	pkt.Service = r.ReadString(2)
+	pkt.Cmd = r.ReadString(3)
+	pkt.NotifyCookie = r.ReadAny(4).([]byte)
+	pkt.MsgType = r.ReadInt32(5)
+	pkt.UserActive = r.ReadInt32(6)
+	pkt.GeneralFlag = r.ReadInt32(7)
+	pkt.BindedUin = r.ReadInt64(8)
+}
+
 func (pkt *OnlineInfo) ReadFrom(r *JceReader) {
 	pkt.InstanceId = r.ReadInt32(0)
 	pkt.ClientType = r.ReadInt32(1)
@@ -810,6 +842,12 @@ func (pkt *SvcReqGetDevLoginInfo) ToBytes() []byte {
 }
 
 func (pkt *SvcReqRegisterNew) ToBytes() []byte {
+	w := NewJceWriter()
+	w.WriteJceStructRaw(pkt)
+	return w.Bytes()
+}
+
+func (pkt *DelFriendReq) ToBytes() []byte {
 	w := NewJceWriter()
 	w.WriteJceStructRaw(pkt)
 	return w.Bytes()

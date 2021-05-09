@@ -46,7 +46,7 @@ type (
 		Time           int32
 		Elements       []IMessageElement
 		OriginalObject *msg.Message
-		//OriginalElements []*msg.Elem
+		// OriginalElements []*msg.Elem
 	}
 
 	SendingMessage struct {
@@ -327,7 +327,7 @@ func ToProtoElems(elems []IMessageElement, generalFlags bool) (r []*msg.Elem) {
 					})
 					break L
 				}
-				//d, _ := hex.DecodeString("08097800C80100F00100F80100900200C80200980300A00320B00300C00300D00300E803008A04020803900480808010B80400C00400")
+				// d, _ := hex.DecodeString("08097800C80100F00100F80100900200C80200980300A00320B00300C00300D00300E803008A04020803900480808010B80400C00400")
 				r = append(r, &msg.Elem{
 					GeneralFlags: &msg.GeneralFlags{
 						PbReserve: []byte{
@@ -480,9 +480,9 @@ func ParseMessageElems(elems []*msg.Elem) []IMessageElement {
 				Height:   elem.CustomFace.GetHeight(),
 				Url: func() string {
 					if elem.CustomFace.GetOrigUrl() == "" {
-						return "http://gchat.qpic.cn/gchatpic_new/0/0-0-" + strings.ReplaceAll(binary.CalculateImageResourceId(elem.CustomFace.Md5)[1:37], "-", "") + "/0?term=2"
+						return "https://gchat.qpic.cn/gchatpic_new/0/0-0-" + strings.ReplaceAll(binary.CalculateImageResourceId(elem.CustomFace.Md5)[1:37], "-", "") + "/0?term=2"
 					}
-					return "http://gchat.qpic.cn" + elem.CustomFace.GetOrigUrl()
+					return "https://gchat.qpic.cn" + elem.CustomFace.GetOrigUrl()
 				}(),
 				Md5: elem.CustomFace.Md5,
 			})
@@ -490,9 +490,9 @@ func ParseMessageElems(elems []*msg.Elem) []IMessageElement {
 		if elem.NotOnlineImage != nil {
 			var img string
 			if elem.NotOnlineImage.GetOrigUrl() != "" {
-				img = "http://c2cpicdw.qpic.cn" + elem.NotOnlineImage.GetOrigUrl()
+				img = "https://c2cpicdw.qpic.cn" + elem.NotOnlineImage.GetOrigUrl()
 			} else {
-				img = "http://c2cpicdw.qpic.cn/offpic_new/0/" + elem.NotOnlineImage.GetResId() + "/0?term=2"
+				img = "https://c2cpicdw.qpic.cn/offpic_new/0/" + elem.NotOnlineImage.GetResId() + "/0?term=2"
 			}
 			res = append(res, &ImageElement{
 				Filename: elem.NotOnlineImage.GetFilePath(),
@@ -590,7 +590,7 @@ func (forMsg *ForwardMessage) CalculateValidationDataForward(seq, random int32, 
 }
 
 func (forMsg *ForwardMessage) packForwardMsg(seq int32, random int32, groupCode int64) []*msg.Message {
-	var msgs = make([]*msg.Message, 0, len(forMsg.Nodes))
+	msgs := make([]*msg.Message, 0, len(forMsg.Nodes))
 	for _, node := range forMsg.Nodes {
 		msgs = append(msgs, &msg.Message{
 			Head: &msg.MessageHead{

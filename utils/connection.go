@@ -10,16 +10,16 @@ import (
 
 type TCPListener struct {
 	conn                 net.Conn
-	planedDisconnect     func(*TCPListener)
+	plannedDisconnect    func(*TCPListener)
 	unexpectedDisconnect func(*TCPListener, error)
 }
 
 var ErrConnectionClosed = errors.New("connection closed")
 
-// PlanedDisconnect 预料中的断开连接
+// PlannedDisconnect 预料中的断开连接
 // 如调用 Close() Connect()
-func (t *TCPListener) PlanedDisconnect(f func(*TCPListener)) {
-	t.planedDisconnect = f
+func (t *TCPListener) PlannedDisconnect(f func(*TCPListener)) {
+	t.plannedDisconnect = f
 }
 
 // UnexpectedDisconnect 未预料钟的断开连接
@@ -59,7 +59,7 @@ func (t *TCPListener) ReadBytes(len int) ([]byte, error) {
 	buf := make([]byte, len)
 	_, err := io.ReadFull(t.conn, buf)
 	if err != nil {
-		time.Sleep(time.Millisecond * 100) // 服务器会发送offline包后立即断开连接, 此时还没解析
+		time.Sleep(time.Millisecond * 100) // 服务器会发送offline包后立即断开连接, 此时还没解析, 可能还是得加锁
 		if t.conn != nil {
 			t.close()
 			t.invokeUnexpectedDisconnect(err)
@@ -82,7 +82,7 @@ func (t *TCPListener) Close() {
 		return
 	}
 	t.close()
-	t.invokePlanedDisconnect()
+	t.invokePlannedDisconnect()
 }
 
 func (t *TCPListener) close() {
@@ -93,14 +93,14 @@ func (t *TCPListener) close() {
 	t.conn = nil
 }
 
-func (t *TCPListener) invokePlanedDisconnect() {
-	if t.planedDisconnect != nil {
-		t.planedDisconnect(t)
+func (t *TCPListener) invokePlannedDisconnect() {
+	if t.plannedDisconnect != nil {
+		go t.plannedDisconnect(t)
 	}
 }
 
 func (t *TCPListener) invokeUnexpectedDisconnect(err error) {
 	if t.unexpectedDisconnect != nil {
-		t.unexpectedDisconnect(t, err)
+		go t.unexpectedDisconnect(t, err)
 	}
 }

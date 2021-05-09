@@ -346,7 +346,7 @@ func decodePushReqPacket(c *QQClient, _ *incomingPacketInfo, payload []byte) (in
 			c.fileStorageInfo = list
 			rsp := cmd0x6ff.C501RspBody{}
 			if err := proto.Unmarshal(list.BigDataChannel.PbBuf, &rsp); err == nil && rsp.RspBody != nil {
-				c.highwaySession = &highwaySessionInfo{
+				c.bigDataSession = &bigDataSessionInfo{
 					SigSession: rsp.RspBody.SigSession,
 					SessionKey: rsp.RspBody.SessionKey,
 				}
@@ -383,7 +383,25 @@ func decodeMessageSvcPacket(c *QQClient, info *incomingPacketInfo, payload []byt
 }
 
 // MessageSvc.PushNotify
-func decodeSvcNotify(c *QQClient, _ *incomingPacketInfo, _ []byte) (interface{}, error) {
+func decodeSvcNotify(c *QQClient, _ *incomingPacketInfo, payload []byte) (interface{}, error) {
+	request := &jce.RequestPacket{}
+	request.ReadFrom(jce.NewJceReader(payload[15:]))
+	data := &jce.RequestDataVersion2{}
+	data.ReadFrom(jce.NewJceReader(request.SBuffer))
+	if len(data.Map) == 0 {
+		_, err := c.sendAndWait(c.buildGetMessageRequestPacket(msg.SyncFlag_START, time.Now().Unix()))
+		return nil, err
+	}
+	notify := &jce.RequestPushNotify{}
+	notify.ReadFrom(jce.NewJceReader(data.Map["req_PushNotify"]["PushNotifyPack.RequestPushNotify"][1:]))
+	if _, ok := troopSystemMsgDecoders[notify.MsgType]; ok && notify.MsgType != 85 && notify.MsgType != 36 {
+		c.exceptAndDispatchGroupSysMsg()
+		return nil, nil
+	}
+	if _, ok := sysMsgDecoders[notify.MsgType]; ok {
+		_, pkt := c.buildSystemMsgNewFriendPacket()
+		return nil, c.send(pkt)
+	}
 	_, err := c.sendAndWait(c.buildGetMessageRequestPacket(msg.SyncFlag_START, time.Now().Unix()))
 	return nil, err
 }
@@ -447,7 +465,7 @@ func decodeFriendGroupListResponse(_ *QQClient, _ *incomingPacketInfo, payload [
 	totalFriendCount := r.ReadInt16(5)
 	friends := []jce.FriendInfo{}
 	r.ReadSlice(&friends, 7)
-	var l = make([]*FriendInfo, 0, len(friends))
+	l := make([]*FriendInfo, 0, len(friends))
 	for _, f := range friends {
 		l = append(l, &FriendInfo{
 			Uin:      f.FriendUin,
@@ -463,6 +481,19 @@ func decodeFriendGroupListResponse(_ *QQClient, _ *incomingPacketInfo, payload [
 	return rsp, nil
 }
 
+// friendlist.delFriend
+func decodeFriendDeleteResponse(_ *QQClient, _ *incomingPacketInfo, payload []byte) (interface{}, error) {
+	request := &jce.RequestPacket{}
+	request.ReadFrom(jce.NewJceReader(payload))
+	data := &jce.RequestDataVersion3{}
+	data.ReadFrom(jce.NewJceReader(request.SBuffer))
+	r := jce.NewJceReader(data.Map["DFRESP"][1:])
+	if ret := r.ReadInt32(2); ret != 0 {
+		return nil, errors.Errorf("delete friend error: %v", ret)
+	}
+	return nil, nil
+}
+
 // friendlist.GetTroopListReqV2
 func decodeGroupListResponse(c *QQClient, _ *incomingPacketInfo, payload []byte) (interface{}, error) {
 	request := &jce.RequestPacket{}
@@ -474,7 +505,7 @@ func decodeGroupListResponse(c *QQClient, _ *incomingPacketInfo, payload []byte)
 	groups := []jce.TroopNumber{}
 	r.ReadSlice(&vecCookie, 4)
 	r.ReadSlice(&groups, 5)
-	var l = make([]*GroupInfo, 0, len(groups))
+	l := make([]*GroupInfo, 0, len(groups))
 	for _, g := range groups {
 		l = append(l, &GroupInfo{
 			Uin:            g.GroupUin,
@@ -507,7 +538,7 @@ func decodeGroupMemberListResponse(_ *QQClient, _ *incomingPacketInfo, payload [
 	members := []jce.TroopMemberInfo{}
 	r.ReadSlice(&members, 3)
 	next := r.ReadInt64(4)
-	var l = make([]*GroupMemberInfo, 0, len(members))
+	l := make([]*GroupMemberInfo, 0, len(members))
 	for _, m := range members {
 		l = append(l, &GroupMemberInfo{
 			Uin:                    m.MemberUin,
@@ -677,7 +708,7 @@ func decodeOnlinePushTransPacket(c *QQClient, _ *incomingPacketInfo, payload []b
 	if info.GetMsgType() == 44 {
 		data.ReadBytes(5)
 		var4 := int32(data.ReadByte())
-		var var5 = int64(0)
+		var5 := int64(0)
 		target := int64(uint32(data.ReadInt32()))
 		if var4 != 0 && var4 != 1 {
 			var5 = int64(uint32(data.ReadInt32()))
