@@ -1,11 +1,12 @@
 package client
 
 import (
+	"github.com/pkg/errors"
+	"google.golang.org/protobuf/proto"
+
 	"github.com/Mrs4s/MiraiGo/client/pb/msg"
 	"github.com/Mrs4s/MiraiGo/message"
 	"github.com/Mrs4s/MiraiGo/protocol/packets"
-	"github.com/pkg/errors"
-	"google.golang.org/protobuf/proto"
 )
 
 // 撤回相关处理逻辑
@@ -75,13 +76,19 @@ func (c *QQClient) buildPrivateRecallPacket(uin, ts int64, msgSeq, random int32)
 					FromUin:   &c.Uin,
 					ToUin:     &uin,
 					MsgTime:   &ts,
-					MsgUid:    proto.Int64(int64(random)),
+					MsgUid:    proto.Int64(0x0100_0000_0000_0000 | (int64(random) & 0xFFFFFFFF)),
 					MsgSeq:    &msgSeq,
 					MsgRandom: &random,
+					RoutingHead: &msg.RoutingHead{
+						C2C: &msg.C2C{
+							ToUin: &uin,
+						},
+					},
 				},
 			},
-			Reserved: []byte{0x08, 0x00},
-			SubCmd:   proto.Int32(1),
+			LongMessageFlag: proto.Int32(0),
+			Reserved:        []byte{0x08, 0x00},
+			SubCmd:          proto.Int32(1),
 		},
 	}}
 	payload, _ := proto.Marshal(req)
