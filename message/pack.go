@@ -3,9 +3,10 @@ package message
 import (
 	"encoding/hex"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/Mrs4s/MiraiGo/binary"
 	"github.com/Mrs4s/MiraiGo/client/pb/msg"
-	"google.golang.org/protobuf/proto"
 )
 
 var imgOld = []byte{
@@ -134,36 +135,11 @@ func (e *ServiceElement) Pack() (r []*msg.Elem) {
 		r = append(r, &msg.Elem{
 			Text: &msg.Text{Str: &e.ResId},
 		})
-		r = append(r, &msg.Elem{
-			RichMsg: &msg.RichMsg{
-				Template1: append([]byte{1}, binary.ZlibCompress([]byte(e.Content))...),
-				ServiceId: &e.Id,
-				MsgResId:  []byte{},
-			},
-		})
-		return
 	}
 	r = append(r, &msg.Elem{
 		RichMsg: &msg.RichMsg{
 			Template1: append([]byte{1}, binary.ZlibCompress([]byte(e.Content))...),
 			ServiceId: &e.Id,
-		},
-	})
-	return
-}
-
-func (e *ForwardElement) Pack() (r []*msg.Elem) {
-	r = []*msg.Elem{}
-	r = append(r, &msg.Elem{
-		RichMsg: &msg.RichMsg{
-			Template1: append([]byte{1}, binary.ZlibCompress([]byte(e.Content))...),
-			ServiceId: proto.Int32(35),
-			MsgResId:  []byte{},
-		},
-	})
-	r = append(r, &msg.Elem{
-		Text: &msg.Text{
-			Str: proto.String("你的QQ暂不支持查看[转发多条消息]，请期待后续版本。"),
 		},
 	})
 	return

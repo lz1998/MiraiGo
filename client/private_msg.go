@@ -2,6 +2,7 @@ package client
 
 import (
 	"math/rand"
+	"sync/atomic"
 	"time"
 
 	"github.com/pkg/errors"
@@ -16,12 +17,21 @@ func (c *QQClient) SendPrivateMessage(target int64, m *message.SendingMessage) *
 	mr := int32(rand.Uint32())
 	var seq int32
 	t := time.Now().Unix()
-	imgCount := m.Count(func(e message.IMessageElement) bool { return e.Type() == message.Image })
-	msgLen := message.EstimateLength(m.Elements, 703)
+	imgCount := 0
+	frag := true
+	for _, e := range m.Elements {
+		switch e.Type() {
+		case message.Image:
+			imgCount++
+		case message.Reply:
+			frag = false
+		}
+	}
+	msgLen := message.EstimateLength(m.Elements)
 	if msgLen > 5000 || imgCount > 50 {
 		return nil
 	}
-	if msgLen > 300 || imgCount > 2 {
+	if frag && (msgLen > 300 || imgCount > 2) {
 		div := int32(rand.Uint32())
 		fragmented := m.ToFragmented()
 		for i, elems := range fragmented {
@@ -37,7 +47,7 @@ func (c *QQClient) SendPrivateMessage(target int64, m *message.SendingMessage) *
 		_, pkt := c.buildFriendSendingPacket(target, seq, mr, 1, 0, 0, t, m.Elements)
 		_ = c.send(pkt)
 	}
-	c.stat.MessageSent++
+	atomic.AddUint64(&c.stat.MessageSent, 1)
 	ret := &message.PrivateMessage{
 		Id:         seq,
 		InternalId: mr,
@@ -76,7 +86,7 @@ func (c *QQClient) SendGroupTempMessage(groupCode, target int64, m *message.Send
 	t := time.Now().Unix()
 	_, pkt := c.buildGroupTempSendingPacket(group.Uin, target, seq, mr, t, m)
 	_ = c.send(pkt)
-	c.stat.MessageSent++
+	atomic.AddUint64(&c.stat.MessageSent, 1)
 	return &message.TempMessage{
 		Id:        seq,
 		GroupCode: group.Code,
@@ -97,7 +107,7 @@ func (c *QQClient) sendWPATempMessage(target int64, sig []byte, m *message.Sendi
 	t := time.Now().Unix()
 	_, pkt := c.buildWPATempSendingPacket(target, sig, seq, mr, t, m)
 	_ = c.send(pkt)
-	c.stat.MessageSent++
+	atomic.AddUint64(&c.stat.MessageSent, 1)
 	return &message.TempMessage{
 		Id:   seq,
 		Self: c.Uin,
